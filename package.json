@@ -1,0 +1,32 @@
+{
+  "name": "com.gamedev.runtimeatlaspacker",
+  "version": "1.0.0",
+  "displayName": "Runtime Atlas Packer",
+  "description": "High-performance runtime texture atlas packing with dynamic updates and zero-allocation design",
+  "unity": "2021.3",
+  "documentationUrl": "https://github.com/your-repo/runtime-atlas-packer",
+  "keywords": [
+    "atlas",
+    "texture",
+    "packing",
+    "sprite",
+    "runtime",
+    "optimization"
+  ],
+  "author": {
+    "name": "GameDev",
+    "email": "dev@example.com"
+  },
+  "dependencies": {
+    "com.unity.collections": "1.4.0",
+    "com.unity.burst": "1.8.0",
+    "com.unity.mathematics": "1.2.6"
+  },
+  "samples": [
+    {
+      "displayName": "Basic Usage",
+      "description": "Examples showing basic and advanced atlas usage patterns",
+      "path": "Samples~/BasicUsage"
+    }
+  ]
+}
