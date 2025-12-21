@@ -9,6 +9,9 @@ All notable changes to this project will be documented in this file.
 - Made Burst compilation optional with automatic fallback to non-Burst implementations
 - Added try-catch error handling in AtlasBatchProcessor for better reliability
 - Jobs now work with or without Burst enabled
+- Fixed Graphics.CopyTexture format incompatibility errors (RGB8 vs RGBA8)
+- Added automatic format conversion via RenderTexture when needed
+- Improved texture blitting to handle all format combinations
 
 ### Added
 - BURST_COMPILATION.md documentation for troubleshooting Burst issues

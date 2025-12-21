@@ -87,27 +87,100 @@ Shader ""Hidden/RuntimeAtlasPacker/Blit""
 
         /// <summary>
         /// Blit a source texture to a target texture at the specified position.
-        /// Uses GPU when available, falls back to CPU.
+        /// Uses GPU when available and formats are compatible, falls back to CPU or RenderTexture.
         /// </summary>
         public static void Blit(Texture2D source, Texture2D target, int x, int y)
         {
             if (source == null || target == null)
                 throw new ArgumentNullException();
 
-            if (SystemInfo.copyTextureSupport != CopyTextureSupport.None)
+            // Check if GPU copy is supported and formats are compatible
+            bool canUseGPUCopy = SystemInfo.copyTextureSupport != CopyTextureSupport.None &&
+                                 AreFormatsCompatibleForGPUCopy(source.format, target.format);
+
+            if (canUseGPUCopy)
             {
-                // Use GPU copy
-                Graphics.CopyTexture(source, 0, 0, 0, 0, source.width, source.height,
-                    target, 0, 0, x, y);
+                try
+                {
+                    // Use GPU copy - fastest method
+                    Graphics.CopyTexture(source, 0, 0, 0, 0, source.width, source.height,
+                        target, 0, 0, x, y);
+                    return;
+                }
+                catch (System.Exception ex)
+                {
+                    Debug.LogWarning($"TextureBlitter: GPU copy failed ({ex.Message}), falling back to alternative method");
+                }
             }
-            else if (source.isReadable && target.isReadable)
+
+            // Try CPU copy if textures are readable
+            if (source.isReadable && target.isReadable)
             {
-                // CPU fallback
                 BlitCPU(source, target, x, y);
+                return;
             }
-            else
+
+            // Last resort: use RenderTexture for format conversion
+            BlitViaRenderTexture(source, target, x, y);
+        }
+
+        /// <summary>
+        /// Check if two texture formats are compatible for Graphics.CopyTexture.
+        /// Graphics.CopyTexture requires exact format match or compatible formats.
+        /// </summary>
+        private static bool AreFormatsCompatibleForGPUCopy(TextureFormat sourceFormat, TextureFormat targetFormat)
+        {
+            // Exact match is always compatible
+            if (sourceFormat == targetFormat)
+                return true;
+
+            // Graphics.CopyTexture requires same memory layout
+            // RGB24 (3 bytes) != RGBA32 (4 bytes) - incompatible
+            // Different compressed formats - incompatible
+            // Different bit depths - incompatible
+
+            // For safety, only allow exact matches
+            return false;
+        }
+
+        /// <summary>
+        /// Blit using RenderTexture as intermediate for format conversion.
+        /// Works even when source/target formats don't match or textures aren't readable.
+        /// </summary>
+        private static void BlitViaRenderTexture(Texture2D source, Texture2D target, int x, int y)
+        {
+            // Create temporary RenderTexture
+            var rt = RenderTexture.GetTemporary(target.width, target.height, 0, RenderTextureFormat.ARGB32, RenderTextureReadWrite.Default);
+
+            var prevActive = RenderTexture.active;
+
+            try
             {
-                Debug.LogWarning("TextureBlitter: Cannot blit - textures not readable and GPU copy not supported");
+                // First, copy existing target content to RT
+                RenderTexture.active = rt;
+                GL.Clear(true, true, Color.clear);
+                Graphics.Blit(target, rt);
+
+                // Then draw source texture at the specified position
+                GL.PushMatrix();
+                GL.LoadPixelMatrix(0, target.width, target.height, 0);
+
+                // Calculate UV and position rects
+                Rect destRect = new Rect(x, y, source.width, source.height);
+
+                // Draw the source texture
+                Graphics.DrawTexture(destRect, source);
+
+                GL.PopMatrix();
+
+                // Read back from RT to target texture
+                target.ReadPixels(new Rect(0, 0, target.width, target.height), 0, 0);
+                target.Apply(false, false);
+            }
+            finally
+            {
+                RenderTexture.active = prevActive;
+                RenderTexture.ReleaseTemporary(rt);
             }
         }
 
@@ -253,17 +326,10 @@ Shader ""Hidden/RuntimeAtlasPacker/Blit""
             // Clear to transparent
             var clearPixels = new Color32[newWidth * newHeight];
             newTexture.SetPixels32(clearPixels);
+            newTexture.Apply(false, false);
 
-            // Copy existing content
-            if (SystemInfo.copyTextureSupport != CopyTextureSupport.None)
-            {
-                Graphics.CopyTexture(source, 0, 0, 0, 0, source.width, source.height,
-                    newTexture, 0, 0, 0, 0);
-            }
-            else if (source.isReadable)
-            {
-                BlitCPU(source, newTexture, 0, 0);
-            }
+            // Copy existing content using the Blit method which handles format conversion
+            Blit(source, newTexture, 0, 0);
 
             return newTexture;
         }
