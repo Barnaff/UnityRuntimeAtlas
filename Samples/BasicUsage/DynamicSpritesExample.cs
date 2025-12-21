@@ -272,7 +272,13 @@ namespace RuntimeAtlasPacker.Samples
             }
 
             _atlas = new RuntimeAtlas();
-            _entry = _atlas.Add(pathTexture);
+            var (result, entry) = _atlas.Add(pathTexture);
+            if (result != AddResult.Success || entry == null)
+            {
+                Debug.LogWarning($"Failed to add path texture to atlas: {result}");
+                return;
+            }
+            _entry = entry;
 
             // Create sprites along circular path
             for (int i = 0; i < spriteCount; i++)

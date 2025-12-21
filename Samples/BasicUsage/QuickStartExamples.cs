@@ -35,8 +35,8 @@ namespace RuntimeAtlasPacker.Samples
             }
 
             // Run examples
-            Example1_SimplestUsage();
-            Example2_CreateSprites();
+            // Example1_SimplestUsage();
+            // Example2_CreateSprites();
             Example3_BatchPacking();
         }
 
@@ -111,21 +111,53 @@ namespace RuntimeAtlasPacker.Samples
                 InitialSize = 512,      // Starting size
                 MaxSize = 2048,         // Maximum size
                 Padding = 2,            // Pixels between sprites
+                Format = TextureFormat.RGBA32,  // Texture format
+                FilterMode = FilterMode.Bilinear,
+                GenerateMipMaps = false,
+                Readable = false,
+                GrowthStrategy = GrowthStrategy.Double,
                 Algorithm = PackingAlgorithm.MaxRects
             });
+
+            Debug.Log($"Created atlas: {_atlas.Width}x{_atlas.Height}");
+            Debug.Log($"Packing {myTextures.Length} textures...");
 
             // Pack all textures at once - much faster!
             _entries = _atlas.AddBatch(myTextures);
 
+            Debug.Log($"=== Packing Complete ===");
             Debug.Log($"Packed {_entries.Length} textures!");
             Debug.Log($"Atlas size: {_atlas.Width}x{_atlas.Height}");
             Debug.Log($"Fill ratio: {_atlas.FillRatio:P1}");
+            
+            // Log each entry for debugging
+            Debug.Log("=== Entry Details ===");
+            for (int i = 0; i < _entries.Length; i++)
+            {
+                var entry = _entries[i];
+                if (entry == null)
+                {
+                    Debug.LogError($"[{i}] NULL ENTRY!");
+                    continue;
+                }
+                
+                Debug.Log($"[{i}] '{entry.Name}' - ID: {entry.Id}, Valid: {entry.IsValid}, Rect: {entry.Rect}, UV: ({entry.UV.x:F3}, {entry.UV.y:F3}, {entry.UV.width:F3}, {entry.UV.height:F3})");
+            }
 
             // Create sprites for each entry
             float xOffset = 0;
+            float maxHeight = 0;
+            
+            Debug.Log("=== Creating Sprite GameObjects ===");
             foreach (var entry in _entries)
             {
-                var go = new GameObject($"Sprite_{entry.Id}");
+                if (entry == null || !entry.IsValid)
+                {
+                    Debug.LogError($"Invalid entry found!");
+                    continue;
+                }
+                
+                var go = new GameObject($"Sprite_{entry.Name}");
                 go.transform.SetParent(spawnContainer);
                 go.transform.localPosition = new Vector3(xOffset, -2, 0);
 
@@ -133,7 +165,36 @@ namespace RuntimeAtlasPacker.Samples
                 renderer.SetEntry(entry);
                 renderer.PixelsPerUnit = 64;
 
-                xOffset += 1.5f;
+                // Calculate sprite world size and add spacing
+                float spriteWidth = entry.Width / renderer.PixelsPerUnit;
+                maxHeight = Mathf.Max(maxHeight, entry.Height / renderer.PixelsPerUnit);
+                
+                Debug.Log($"Spawned '{entry.Name}' at world position ({xOffset:F2}, -2, 0), sprite width in world units: {spriteWidth:F2}");
+                
+                xOffset += spriteWidth + 0.5f; // Add 0.5 unit spacing between sprites
+            }
+            
+            Debug.Log($"=== Batch Packing Example Complete ===");
+            
+            // Save atlas texture for debugging
+            SaveAtlasTexture();
+        }
+        
+        // Debug helper: Save atlas texture to file
+        private void SaveAtlasTexture()
+        {
+            if (_atlas == null || _atlas.Texture == null) return;
+            
+            try
+            {
+                var bytes = _atlas.Texture.EncodeToPNG();
+                var path = System.IO.Path.Combine(UnityEngine.Application.dataPath, "AtlasDebug.png");
+                System.IO.File.WriteAllBytes(path, bytes);
+                Debug.Log($"[Debug] Saved atlas texture to: {path}");
+            }
+            catch (System.Exception ex)
+            {
+                Debug.LogWarning($"[Debug] Could not save atlas texture: {ex.Message}");
             }
         }
 
@@ -149,19 +210,29 @@ namespace RuntimeAtlasPacker.Samples
 
             for (int i = 0; i < colors.Length; i++)
             {
-                textures[i] = new Texture2D(32, 32);
-                var pixels = new Color[32 * 32];
+                // Create readable texture with proper name
+                textures[i] = new Texture2D(64, 64, TextureFormat.RGBA32, false);
+                textures[i].name = $"Color_{colors[i].ToString()}";
                 
-                for (int p = 0; p < pixels.Length; p++)
+                var pixels = new Color[64 * 64];
+                
+                // Create a simple pattern so we can see if it's rendering
+                for (int y = 0; y < 64; y++)
                 {
-                    pixels[p] = colors[i];
+                    for (int x = 0; x < 64; x++)
+                    {
+                        // Add a border to help identify each texture
+                        bool isBorder = x < 2 || x >= 62 || y < 2 || y >= 62;
+                        pixels[y * 64 + x] = isBorder ? Color.white : colors[i];
+                    }
                 }
                 
                 textures[i].SetPixels(pixels);
-                textures[i].Apply();
-                textures[i].name = $"Color_{colors[i]}";
+                textures[i].Apply(false, false); // Don't make it non-readable
+                textures[i].filterMode = FilterMode.Point;
             }
 
+            Debug.Log($"Created {textures.Length} placeholder textures with visible borders");
             return textures;
         }
 
@@ -173,7 +244,8 @@ namespace RuntimeAtlasPacker.Samples
         // Show info in game view
         private void OnGUI()
         {
-            GUILayout.BeginArea(new Rect(10, 10, 350, 200));
+            GUILayout.BeginArea(new Rect(10, 10, 400, 300));
+            
             GUILayout.Label("QuickStart Examples", GUI.skin.box);
             GUILayout.Label($"Textures loaded: {myTextures?.Length ?? 0}");
             
@@ -182,10 +254,22 @@ namespace RuntimeAtlasPacker.Samples
                 GUILayout.Label($"Atlas: {_atlas.Width}x{_atlas.Height}");
                 GUILayout.Label($"Entries: {_atlas.EntryCount}");
                 GUILayout.Label($"Fill: {_atlas.FillRatio:P1}");
+                
+                GUILayout.Space(10);
+                
+                // Show atlas texture preview
+                if (_atlas.Texture != null)
+                {
+                    GUILayout.Label("Atlas Preview:");
+                    float previewSize = 150;
+                    Rect previewRect = GUILayoutUtility.GetRect(previewSize, previewSize);
+                    GUI.DrawTexture(previewRect, _atlas.Texture, ScaleMode.ScaleToFit);
+                }
             }
 
             GUILayout.Space(10);
             GUILayout.Label("See console for detailed output!");
+            
             GUILayout.EndArea();
         }
     }

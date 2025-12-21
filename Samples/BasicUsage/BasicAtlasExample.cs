@@ -79,8 +79,11 @@ namespace RuntimeAtlasPacker.Samples
 
         async Task PackTexturesAsync()
         {
-            // Async batch pack - doesn't block the main thread
-            var entries = await _atlas.AddBatchAsync(texturesToPack);
+            // Batch pack (synchronous as it requires main thread for texture operations)
+            var entries = _atlas.AddBatch(texturesToPack);
+            
+            // Yield to allow frame update if needed, though packing is usually fast
+            await Task.Yield();
             
             for (int i = 0; i < entries.Length; i++)
             {
@@ -123,7 +126,13 @@ namespace RuntimeAtlasPacker.Samples
         /// </summary>
         public AtlasEntry AddTexture(Texture2D texture)
         {
-            var entry = _atlas.Add(texture);
+            var (result, entry) = _atlas.Add(texture);
+            if (result != AddResult.Success || entry == null)
+            {
+                Debug.LogWarning($"Failed to add texture to atlas: {result}");
+                return null;
+            }
+            
             _entries.Add(entry);
             entry.OnUVChanged += OnEntryUVChanged;
             

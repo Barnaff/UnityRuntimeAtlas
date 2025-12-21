@@ -132,7 +132,8 @@ namespace RuntimeAtlasPacker
                 );
 
                 // Create entry through atlas
-                entries[i] = atlas.Add(textures[i]);
+                var (result, entry) = atlas.Add(textures[i]);
+                entries[i] = entry; // May be null if failed
             }
 
             atlas.Apply();

@@ -9,11 +9,13 @@ namespace RuntimeAtlasPacker
     /// <summary>
     /// Simplified static API for common atlas packing operations.
     /// Manages a default atlas instance for quick use cases.
+    /// Automatically creates overflow atlases when existing atlases are full.
     /// </summary>
     public static class AtlasPacker
     {
         private static RuntimeAtlas _defaultAtlas;
         private static readonly Dictionary<string, RuntimeAtlas> _namedAtlases = new();
+        private static readonly Dictionary<string, int> _overflowCounters = new();
         private static readonly object _lock = new();
 
         /// <summary>
@@ -52,51 +54,176 @@ namespace RuntimeAtlasPacker
 
         /// <summary>
         /// Pack a texture into the default atlas.
+        /// Automatically creates overflow atlases if the current one is full.
         /// </summary>
         public static AtlasEntry Pack(Texture2D texture)
         {
-            return Default.Add(texture);
+            lock (_lock)
+            {
+                // Try default atlas first
+                var (result, entry) = Default.Add(texture);
+                if (result == AddResult.Success)
+                    return entry;
+
+                // Check if texture is too large or invalid
+                if (result == AddResult.TooLarge)
+                {
+                    Debug.LogError($"[AtlasPacker] Texture is too large to fit in any atlas (MaxSize: {Default.Settings.MaxSize})");
+                    return null;
+                }
+                
+                if (result == AddResult.InvalidTexture)
+                {
+                    Debug.LogError("[AtlasPacker] Invalid texture provided");
+                    return null;
+                }
+
+                // Default atlas is full, try overflow atlases
+                Debug.Log("[AtlasPacker] Default atlas is full, checking overflow atlases...");
+
+                // Try existing overflow atlases
+                int overflowIndex = 1;
+                while (true)
+                {
+                    string overflowName = $"[Default_Overflow_{overflowIndex}]";
+                    
+                    if (_namedAtlases.TryGetValue(overflowName, out var overflowAtlas))
+                    {
+                        (result, entry) = overflowAtlas.Add(texture);
+                        if (result == AddResult.Success)
+                        {
+                            Debug.Log($"[AtlasPacker] Added to existing overflow atlas: {overflowName}");
+                            return entry;
+                        }
+                        overflowIndex++;
+                    }
+                    else
+                    {
+                        // Create new overflow atlas
+                        Debug.Log($"[AtlasPacker] Creating new overflow atlas: {overflowName}");
+                        var newAtlas = new RuntimeAtlas(Default.Settings);
+                        _namedAtlases[overflowName] = newAtlas;
+                        _overflowCounters["[Default]"] = overflowIndex;
+                        
+                        (result, entry) = newAtlas.Add(texture);
+                        if (result == AddResult.Success)
+                        {
+                            Debug.Log($"[AtlasPacker] Successfully added to new overflow atlas: {overflowName}");
+                            return entry;
+                        }
+                        
+                        Debug.LogError($"[AtlasPacker] Failed to add texture even to new overflow atlas! Result: {result}");
+                        return null;
+                    }
+                }
+            }
         }
 
-        /// <summary>
-        /// Pack a texture into the default atlas asynchronously.
-        /// </summary>
-        public static Task<AtlasEntry> PackAsync(Texture2D texture, CancellationToken cancellationToken = default)
-        {
-            return Default.AddAsync(texture, cancellationToken);
-        }
 
         /// <summary>
         /// Pack multiple textures into the default atlas.
+        /// Automatically creates overflow atlases when needed.
         /// </summary>
         public static AtlasEntry[] PackBatch(params Texture2D[] textures)
         {
-            return Default.AddBatch(textures);
+            lock (_lock)
+            {
+                var entries = new List<AtlasEntry>();
+                
+                foreach (var texture in textures)
+                {
+                    var entry = Pack(texture); // Use Pack which handles overflow
+                    if (entry != null)
+                    {
+                        entries.Add(entry);
+                    }
+                }
+                
+                return entries.ToArray();
+            }
         }
 
-        /// <summary>
-        /// Pack multiple textures asynchronously.
-        /// </summary>
-        public static Task<AtlasEntry[]> PackBatchAsync(Texture2D[] textures, CancellationToken cancellationToken = default)
-        {
-            return Default.AddBatchAsync(textures, cancellationToken);
-        }
 
         /// <summary>
         /// Pack a sprite into the default atlas and return a new sprite.
         /// </summary>
         public static Sprite PackSprite(Sprite sprite, float? pixelsPerUnit = null)
         {
-            var entry = Default.Add(sprite.texture);
+            var (result, entry) = Default.Add(sprite.texture);
+            if (result != AddResult.Success || entry == null)
+            {
+                Debug.LogWarning($"[AtlasPacker] Failed to pack sprite '{sprite.name}': {result}");
+                return null;
+            }
             return entry.CreateSprite(pixelsPerUnit ?? sprite.pixelsPerUnit, sprite.pivot / sprite.rect.size);
         }
 
         /// <summary>
         /// Pack into a named atlas.
+        /// Automatically creates overflow atlases if the named atlas is full.
         /// </summary>
         public static AtlasEntry Pack(string atlasName, Texture2D texture)
         {
-            return GetOrCreate(atlasName).Add(texture);
+            lock (_lock)
+            {
+                // Try main named atlas first
+                var atlas = GetOrCreate(atlasName);
+                var (result, entry) = atlas.Add(texture);
+                if (result == AddResult.Success)
+                    return entry;
+
+                // Check if texture is too large or invalid
+                if (result == AddResult.TooLarge)
+                {
+                    Debug.LogError($"[AtlasPacker] Texture is too large to fit in atlas '{atlasName}' (MaxSize: {atlas.Settings.MaxSize})");
+                    return null;
+                }
+                
+                if (result == AddResult.InvalidTexture)
+                {
+                    Debug.LogError($"[AtlasPacker] Invalid texture provided for atlas '{atlasName}'");
+                    return null;
+                }
+
+                // Named atlas is full, try overflow atlases
+                Debug.Log($"[AtlasPacker] Named atlas '{atlasName}' is full, checking overflow atlases...");
+
+                // Try existing overflow atlases
+                int overflowIndex = 1;
+                while (true)
+                {
+                    string overflowName = $"{atlasName}_Overflow_{overflowIndex}";
+                    
+                    if (_namedAtlases.TryGetValue(overflowName, out var overflowAtlas))
+                    {
+                        (result, entry) = overflowAtlas.Add(texture);
+                        if (result == AddResult.Success)
+                        {
+                            Debug.Log($"[AtlasPacker] Added to existing overflow atlas: {overflowName}");
+                            return entry;
+                        }
+                        overflowIndex++;
+                    }
+                    else
+                    {
+                        // Create new overflow atlas
+                        Debug.Log($"[AtlasPacker] Creating new overflow atlas: {overflowName}");
+                        var newAtlas = new RuntimeAtlas(atlas.Settings);
+                        _namedAtlases[overflowName] = newAtlas;
+                        _overflowCounters[atlasName] = overflowIndex;
+                        
+                        (result, entry) = newAtlas.Add(texture);
+                        if (result == AddResult.Success)
+                        {
+                            Debug.Log($"[AtlasPacker] Successfully added to new overflow atlas: {overflowName}");
+                            return entry;
+                        }
+                        
+                        Debug.LogError($"[AtlasPacker] Failed to add texture even to new overflow atlas! Result: {result}");
+                        return null;
+                    }
+                }
+            }
         }
 
         /// <summary>
@@ -140,6 +267,81 @@ namespace RuntimeAtlasPacker
                     atlas.Dispose();
                 }
                 _namedAtlases.Clear();
+                _overflowCounters.Clear();
+            }
+        }
+
+        /// <summary>
+        /// Get the number of overflow atlases for the default atlas.
+        /// </summary>
+        public static int GetDefaultOverflowCount()
+        {
+            lock (_lock)
+            {
+                return _overflowCounters.TryGetValue("[Default]", out var count) ? count : 0;
+            }
+        }
+
+        /// <summary>
+        /// Get the number of overflow atlases for a named atlas.
+        /// </summary>
+        public static int GetOverflowCount(string atlasName)
+        {
+            lock (_lock)
+            {
+                return _overflowCounters.TryGetValue(atlasName, out var count) ? count : 0;
+            }
+        }
+
+        /// <summary>
+        /// Get all atlases including overflow atlases for the default atlas.
+        /// </summary>
+        public static RuntimeAtlas[] GetAllDefaultAtlases()
+        {
+            lock (_lock)
+            {
+                var atlases = new List<RuntimeAtlas>();
+                
+                if (_defaultAtlas != null)
+                    atlases.Add(_defaultAtlas);
+                
+                int overflowCount = GetDefaultOverflowCount();
+                for (int i = 1; i <= overflowCount; i++)
+                {
+                    string overflowName = $"[Default_Overflow_{i}]";
+                    if (_namedAtlases.TryGetValue(overflowName, out var atlas))
+                    {
+                        atlases.Add(atlas);
+                    }
+                }
+                
+                return atlases.ToArray();
+            }
+        }
+
+        /// <summary>
+        /// Get all atlases including overflow atlases for a named atlas.
+        /// </summary>
+        public static RuntimeAtlas[] GetAllAtlases(string atlasName)
+        {
+            lock (_lock)
+            {
+                var atlases = new List<RuntimeAtlas>();
+                
+                if (_namedAtlases.TryGetValue(atlasName, out var mainAtlas))
+                    atlases.Add(mainAtlas);
+                
+                int overflowCount = GetOverflowCount(atlasName);
+                for (int i = 1; i <= overflowCount; i++)
+                {
+                    string overflowName = $"{atlasName}_Overflow_{i}";
+                    if (_namedAtlases.TryGetValue(overflowName, out var atlas))
+                    {
+                        atlases.Add(atlas);
+                    }
+                }
+                
+                return atlases.ToArray();
             }
         }
 

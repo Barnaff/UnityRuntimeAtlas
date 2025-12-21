@@ -67,8 +67,14 @@ namespace RuntimeAtlasPacker.Samples
                 return null;
             }
 
-            // Pack and cache
-            var entry = await _atlas.AddAsync(texture, _cts.Token);
+            // Pack and cache (using synchronous Add)
+            var (result, entry) = _atlas.Add(texture);
+            if (result != AddResult.Success || entry == null)
+            {
+                Debug.LogWarning($"Failed to pack sprite '{spriteName}': {result}");
+                return null;
+            }
+            
             _entryCache[spriteName] = entry;
             
             UpdatePreview();

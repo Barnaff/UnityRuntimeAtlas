@@ -44,14 +44,25 @@ namespace RuntimeAtlasPacker
         {
             result = default;
             
-            if (width <= 0 || height <= 0 || width > _width || height > _height)
+            if (width <= 0 || height <= 0)
+            {
+                Debug.LogError($"[MaxRects.TryPack] Invalid dimensions: {width}x{height}");
                 return false;
+            }
+            
+            if (width > _width || height > _height)
+            {
+                Debug.Log($"[MaxRects.TryPack] Size {width}x{height} exceeds atlas {_width}x{_height}");
+                return false;
+            }
 
             // Find best position using Best Short Side Fit heuristic
             int bestScore1 = int.MaxValue;
             int bestScore2 = int.MaxValue;
             int bestIndex = -1;
             int4 bestRect = default;
+            int candidatesChecked = 0;
+            int candidatesSkippedOverlap = 0;
 
             for (int i = 0; i < _freeRects.Length; i++)
             {
@@ -60,6 +71,18 @@ namespace RuntimeAtlasPacker
                 // Try to place without rotation
                 if (freeRect.z >= width && freeRect.w >= height)
                 {
+                    candidatesChecked++;
+                    
+                    // Create candidate rect
+                    var candidateRect = new int4(freeRect.x, freeRect.y, width, height);
+                    
+                    // CRITICAL: Verify this position doesn't overlap with any used rectangles
+                    if (OverlapsAnyUsedRect(candidateRect))
+                    {
+                        candidatesSkippedOverlap++;
+                        continue;
+                    }
+                    
                     int leftoverHoriz = math.abs(freeRect.z - width);
                     int leftoverVert = math.abs(freeRect.w - height);
                     int shortSideFit = math.min(leftoverHoriz, leftoverVert);
@@ -70,13 +93,16 @@ namespace RuntimeAtlasPacker
                         bestScore1 = shortSideFit;
                         bestScore2 = longSideFit;
                         bestIndex = i;
-                        bestRect = new int4(freeRect.x, freeRect.y, width, height);
+                        bestRect = candidateRect;
                     }
                 }
             }
 
             if (bestIndex == -1)
+            {
+                Debug.LogWarning($"[MaxRects.TryPack] FAILED to pack {width}x{height}. Atlas: {_width}x{_height}, FreeRects: {_freeRects.Length}, UsedRects: {_usedRects.Length}, Candidates: {candidatesChecked}, SkippedOverlaps: {candidatesSkippedOverlap}");
                 return false;
+            }
 
             // Place the rectangle
             PlaceRect(bestRect);
@@ -84,29 +110,68 @@ namespace RuntimeAtlasPacker
             result = new RectInt(bestRect.x, bestRect.y, bestRect.z, bestRect.w);
             _usedArea += (long)width * height;
             
+            Debug.Log($"[MaxRects.TryPack] SUCCESS packed {width}x{height} at ({result.x}, {result.y}). UsedRects: {_usedRects.Length}, FreeRects: {_freeRects.Length}");
             return true;
+        }
+        
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        private bool OverlapsAnyUsedRect(int4 rect)
+        {
+            for (int i = 0; i < _usedRects.Length; i++)
+            {
+                if (RectsIntersect(rect, _usedRects[i]))
+                    return true;
+            }
+            return false;
+        }
+        
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        private static bool RectsIntersect(int4 a, int4 b)
+        {
+            // Two rectangles intersect if they overlap in both X and Y
+            return !(a.x + a.z <= b.x || b.x + b.z <= a.x ||
+                     a.y + a.w <= b.y || b.y + b.w <= a.y);
         }
 
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
         private void PlaceRect(int4 rect)
         {
+            // Collect all new free rects from splitting
+            var tempNewRects = new NativeList<int4>(16, Allocator.Temp);
+            
             // Split overlapping free rectangles
             for (int i = _freeRects.Length - 1; i >= 0; i--)
             {
                 if (SplitFreeRect(_freeRects[i], rect, out var newRects))
                 {
-                    _freeRects.RemoveAtSwapBack(i);
-                    
+                    // Add new split rects to temporary list
                     for (int j = 0; j < newRects.Length; j++)
                     {
-                        _freeRects.Add(newRects[j]);
+                        var newRect = newRects[j];
+                        // Only add valid rects (positive dimensions)
+                        if (newRect.z > 0 && newRect.w > 0)
+                        {
+                            tempNewRects.Add(newRect);
+                        }
                     }
+                    newRects.Dispose();
+                    
+                    // Remove the original free rect
+                    _freeRects.RemoveAtSwapBack(i);
                 }
             }
+            
+            // Add all new rects to free list
+            for (int i = 0; i < tempNewRects.Length; i++)
+            {
+                _freeRects.Add(tempNewRects[i]);
+            }
+            tempNewRects.Dispose();
 
             // Prune contained rectangles
             PruneFreeRects();
             
+            // Add to used rects
             _usedRects.Add(rect);
         }
 

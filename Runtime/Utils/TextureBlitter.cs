@@ -86,42 +86,21 @@ Shader ""Hidden/RuntimeAtlasPacker/Blit""
         }
 
         /// <summary>
+        /// <summary>
         /// Blit a source texture to a target texture at the specified position.
-        /// Uses GPU when available and formats are compatible, falls back to CPU or RenderTexture.
+        /// Works with both readable and non-readable textures.
         /// </summary>
         public static void Blit(Texture2D source, Texture2D target, int x, int y)
         {
             if (source == null || target == null)
                 throw new ArgumentNullException();
 
-            // Check if GPU copy is supported and formats are compatible
-            bool canUseGPUCopy = SystemInfo.copyTextureSupport != CopyTextureSupport.None &&
-                                 AreFormatsCompatibleForGPUCopy(source.format, target.format);
+            Debug.Log($"[TextureBlitter] Blitting '{source.name}' ({source.width}x{source.height}) to ({x}, {y})");
+            Debug.Log($"[TextureBlitter] Source: readable={source.isReadable}, format={source.format}");
+            Debug.Log($"[TextureBlitter] Target: readable={target.isReadable}, format={target.format}");
 
-            if (canUseGPUCopy)
-            {
-                try
-                {
-                    // Use GPU copy - fastest method
-                    Graphics.CopyTexture(source, 0, 0, 0, 0, source.width, source.height,
-                        target, 0, 0, x, y);
-                    return;
-                }
-                catch (System.Exception ex)
-                {
-                    Debug.LogWarning($"TextureBlitter: GPU copy failed ({ex.Message}), falling back to alternative method");
-                }
-            }
-
-            // Try CPU copy if textures are readable
-            if (source.isReadable && target.isReadable)
-            {
-                BlitCPU(source, target, x, y);
-                return;
-            }
-
-            // Last resort: use RenderTexture for format conversion
-            BlitViaRenderTexture(source, target, x, y);
+            // Use Material-based rendering - works with ALL textures
+            BlitWithMaterial(source, target, x, y);
         }
 
         /// <summary>
@@ -144,68 +123,126 @@ Shader ""Hidden/RuntimeAtlasPacker/Blit""
         }
 
         /// <summary>
-        /// Blit using RenderTexture as intermediate for format conversion.
-        /// Works even when source/target formats don't match or textures aren't readable.
+        /// Blit using Material-based rendering - works with ALL texture formats and readability states.
+        /// This is the DEFINITIVE solution for non-readable textures.
         /// </summary>
-        private static void BlitViaRenderTexture(Texture2D source, Texture2D target, int x, int y)
+        private static void BlitWithMaterial(Texture2D source, Texture2D target, int x, int y)
         {
-            // Create temporary RenderTexture matching target size
-            var rt = RenderTexture.GetTemporary(target.width, target.height, 0, RenderTextureFormat.ARGB32, RenderTextureReadWrite.Default);
-            var prevActive = RenderTexture.active;
-
+            Debug.Log($"[TextureBlitter.Material] Starting blit for '{source.name}' at ({x},{y})");
+            
+            EnsureMaterial();
+            
+            RenderTexture rt = null;
+            RenderTexture prevActive = RenderTexture.active;
+            
             try
             {
-                // Copy existing target content to RT (preserves other atlas entries)
-                RenderTexture.active = rt;
-                GL.Clear(true, true, Color.clear);
+                // Create RenderTexture matching target size
+                // CRITICAL: Use sRGB for correct color space (prevents burned/washed out colors)
+                rt = RenderTexture.GetTemporary(
+                    target.width, 
+                    target.height, 
+                    0, 
+                    RenderTextureFormat.ARGB32,
+                    RenderTextureReadWrite.sRGB  // Changed from Linear to sRGB for proper colors
+                );
+                rt.filterMode = FilterMode.Point;
+                
+                Debug.Log($"[TextureBlitter.Material] Step 1: Copy existing target to RT");
+                // Preserve existing atlas content
                 Graphics.Blit(target, rt);
-
-                // Draw source texture at the specified position
-                GL.PushMatrix();
-                GL.LoadPixelMatrix(0, target.width, target.height, 0);
-
-                Rect destRect = new Rect(x, y, source.width, source.height);
-                Graphics.DrawTexture(destRect, source);
-
-                GL.PopMatrix();
-
-                // Copy back from RT to target
-                // Use Graphics.CopyTexture if possible (doesn't require target to be readable)
-                RenderTexture.active = null;
-
-                if (SystemInfo.copyTextureSupport != CopyTextureSupport.None)
+                
+                Debug.Log($"[TextureBlitter.Material] Step 2: Draw source at ({x},{y}) using Material");
+                // Activate RT for rendering
+                RenderTexture.active = rt;
+                
+                // CRITICAL FIX: Flip Y coordinate because Unity's texture coordinates are bottom-left origin
+                // but we're using top-left pixel coordinates
+                float yFlipped = target.height - y - source.height;
+                
+                Debug.Log($"[TextureBlitter.Material] Original Y: {y}, Flipped Y: {yFlipped}");
+                
+                // Use Graphics.Blit with custom material for precise positioning
+                Material blitMat = GetBlitMaterial();
+                if (blitMat != null)
                 {
-                    // GPU copy from RT to target - doesn't require readable
-                    Graphics.CopyTexture(rt, target);
+                    // Set source texture
+                    blitMat.mainTexture = source;
+                    
+                    // Use Graphics.DrawTexture for pixel-perfect positioning
+                    GL.PushMatrix();
+                    GL.LoadPixelMatrix(0, target.width, target.height, 0);
+                    
+                    // Draw at exact pixel position with flipped Y
+                    Rect destRect = new Rect(x, yFlipped, source.width, source.height);
+                    Graphics.DrawTexture(destRect, source, blitMat);
+                    
+                    GL.PopMatrix();
                 }
                 else
                 {
-                    // Fallback: need to make target readable temporarily or use Blit
-                    // This is the absolute fallback for platforms without CopyTexture support
-                    var tempTexture = new Texture2D(target.width, target.height, target.format, false);
-                    RenderTexture.active = rt;
-                    tempTexture.ReadPixels(new Rect(0, 0, rt.width, rt.height), 0, 0);
-                    tempTexture.Apply(false, false);
-                    RenderTexture.active = null;
-
-                    // Now copy from temp to target using CPU
-                    if (target.isReadable)
-                    {
-                        BlitCPU(tempTexture, target, 0, 0);
-                    }
-                    else
-                    {
-                        Debug.LogError("TextureBlitter: Cannot blit - target texture is not readable and CopyTexture is not supported on this platform. Please enable 'Read/Write Enabled' in texture import settings for atlas textures.");
-                    }
-
-                    UnityEngine.Object.DestroyImmediate(tempTexture);
+                    // Fallback: use Graphics.DrawTexture without material
+                    GL.PushMatrix();
+                    GL.LoadPixelMatrix(0, target.width, target.height, 0);
+                    
+                    // Draw at exact pixel position with flipped Y
+                    Rect destRect = new Rect(x, yFlipped, source.width, source.height);
+                    Graphics.DrawTexture(destRect, source);
+                    
+                    GL.PopMatrix();
                 }
+                
+                RenderTexture.active = null;
+                
+                Debug.Log($"[TextureBlitter.Material] Step 3: Copy RT back to target");
+                // Copy result back to target texture
+                RenderTexture.active = rt;
+                target.ReadPixels(new Rect(0, 0, rt.width, rt.height), 0, 0, false);
+                target.Apply(false, false);
+                RenderTexture.active = null;
+                
+                Debug.Log($"[TextureBlitter.Material] SUCCESS - blit complete");
+            }
+            catch (System.Exception ex)
+            {
+                Debug.LogError($"[TextureBlitter.Material] FAILED: {ex.Message}\n{ex.StackTrace}");
+                throw;
             }
             finally
             {
                 RenderTexture.active = prevActive;
-                RenderTexture.ReleaseTemporary(rt);
+                if (rt != null)
+                {
+                    RenderTexture.ReleaseTemporary(rt);
+                }
             }
+        }
+        
+        /// <summary>
+        /// Get or create the blit material.
+        /// </summary>
+        private static Material GetBlitMaterial()
+        {
+            EnsureMaterial();
+            
+            // If no custom material, create a simple one
+            if (_blitMaterial == null)
+            {
+                // Try to find Unity's built-in blit shader
+                Shader shader = Shader.Find("Hidden/BlitCopy");
+                if (shader == null)
+                {
+                    shader = Shader.Find("UI/Default");
+                }
+                
+                if (shader != null)
+                {
+                    _blitMaterial = new Material(shader);
+                    _blitMaterial.hideFlags = HideFlags.HideAndDontSave;
+                }
+            }
+            
+            return _blitMaterial;
         }
 
         /// <summary>

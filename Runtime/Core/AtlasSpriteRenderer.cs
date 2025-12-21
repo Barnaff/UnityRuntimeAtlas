@@ -131,8 +131,16 @@ namespace RuntimeAtlasPacker
                     ? AtlasPacker.Default
                     : AtlasPacker.GetOrCreate(_targetAtlasName);
 
-                var entry = atlas.Add(texture);
-                SetEntry(entry);
+                var (result, entry) = atlas.Add(texture);
+                if (result == AddResult.Success && entry != null)
+                {
+                    SetEntry(entry);
+                }
+                else
+                {
+                    Debug.LogWarning($"[AtlasSpriteRenderer] Failed to pack texture '{texture.name}': {result}");
+                    ClearSprite();
+                }
             }
             else
             {
@@ -165,28 +173,6 @@ namespace RuntimeAtlasPacker
 
         /// <summary>
         /// Pack and set a texture asynchronously.
-        /// </summary>
-        public async Task<AtlasSpriteRenderer> SetTextureAsync(Texture2D texture)
-        {
-            if (texture == null)
-            {
-                SetEntry(null);
-                return this;
-            }
-
-            var atlas = string.IsNullOrEmpty(_targetAtlasName)
-                ? AtlasPacker.Default
-                : AtlasPacker.GetOrCreate(_targetAtlasName);
-
-            var entry = await atlas.AddAsync(texture);
-            
-            if (!_isDestroyed)
-            {
-                SetEntry(entry);
-            }
-
-            return this;
-        }
 
         /// <summary>
         /// Clear the current sprite.

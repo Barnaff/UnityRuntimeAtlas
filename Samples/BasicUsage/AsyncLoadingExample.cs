@@ -40,6 +40,11 @@ namespace RuntimeAtlasPacker.Samples
                 InitialSize = 512,
                 MaxSize = 4096,
                 Padding = 2,
+                Format = TextureFormat.RGBA32,
+                FilterMode = FilterMode.Bilinear,
+                GenerateMipMaps = false,
+                Readable = false,
+                GrowthStrategy = GrowthStrategy.Double,
                 Algorithm = PackingAlgorithm.MaxRects
             });
 
@@ -129,8 +134,8 @@ namespace RuntimeAtlasPacker.Samples
 
             if (loadedTextures.Count > 0)
             {
-                // Use async batch packing
-                var entries = await _atlas.AddBatchAsync(loadedTextures.ToArray(), ct);
+                // Use synchronous batch packing (it's fast)
+                var entries = _atlas.AddBatch(loadedTextures.ToArray());
                 _entries.AddRange(entries);
 
                 // Cleanup source textures
@@ -306,8 +311,8 @@ namespace RuntimeAtlasPacker.Samples
 
                 onProgress?.Invoke(0.5f);
 
-                // Pack asynchronously
-                var entries = await _atlas.AddBatchAsync(textures);
+                // Pack synchronously (texture packing is fast)
+                var entries = _atlas.AddBatch(textures);
                 _entries.AddRange(entries);
 
                 onProgress?.Invoke(1f);
@@ -359,6 +364,10 @@ namespace RuntimeAtlasPacker.Samples
                 InitialSize = 1024,
                 MaxSize = 4096,
                 Padding = 2,
+                Format = TextureFormat.RGBA32,
+                FilterMode = FilterMode.Bilinear,
+                GenerateMipMaps = false,
+                Readable = false,
                 Algorithm = PackingAlgorithm.MaxRects,
                 GrowthStrategy = GrowthStrategy.Double
             });

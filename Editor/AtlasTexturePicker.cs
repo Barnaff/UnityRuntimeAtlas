@@ -298,8 +298,15 @@ namespace RuntimeAtlasPacker.Editor
                         importer.SaveAndReimport();
                     }
                     
-                    targetAtlas.Add(texture);
-                    successCount++;
+                    var (result, entry) = targetAtlas.Add(texture);
+                    if (result == AddResult.Success && entry != null)
+                    {
+                        successCount++;
+                    }
+                    else
+                    {
+                        Debug.LogWarning($"Failed to add texture '{texture.name}': {result}");
+                    }
                     
                     if (!wasReadable && importer != null)
                     {
@@ -410,8 +417,15 @@ namespace RuntimeAtlasPacker.Editor
                     
                     try
                     {
-                        atlas.Add(texture);
-                        successCount++;
+                        var (result, entry) = atlas.Add(texture);
+                        if (result == AddResult.Success && entry != null)
+                        {
+                            successCount++;
+                        }
+                        else
+                        {
+                            Debug.LogWarning($"Failed to add {texture.name}: {result}");
+                        }
                     }
                     catch (Exception e)
                     {

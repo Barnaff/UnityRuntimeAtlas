@@ -9,11 +9,11 @@ namespace RuntimeAtlasPacker.Editor
 {
     /// <summary>
     /// Profiler window for tracking atlas operations and performance.
+    /// Automatically enabled and recording when play mode starts.
     /// </summary>
     public class AtlasProfilerWindow : EditorWindow
     {
         private Vector2 _scrollPosition;
-        private bool _isRecording = true;
         private int _maxLogEntries = 500;
         
         private static readonly List<ProfileEntry> _entries = new();
@@ -46,18 +46,68 @@ namespace RuntimeAtlasPacker.Editor
 
         private void OnEnable()
         {
+            // Connect to both profiling systems
             AtlasProfiler.OnOperationLogged += OnOperationLogged;
+            RuntimeAtlasProfiler.EditorProfilerBridge += OnRuntimeProfilerData;
+            EditorApplication.playModeStateChanged += OnPlayModeStateChanged;
+            
+            // Ensure runtime profiler is enabled
+            RuntimeAtlasProfiler.Enabled = true;
         }
 
         private void OnDisable()
         {
             AtlasProfiler.OnOperationLogged -= OnOperationLogged;
+            RuntimeAtlasProfiler.EditorProfilerBridge -= OnRuntimeProfilerData;
+            EditorApplication.playModeStateChanged -= OnPlayModeStateChanged;
+        }
+
+        private void OnPlayModeStateChanged(PlayModeStateChange state)
+        {
+            if (state == PlayModeStateChange.EnteredPlayMode)
+            {
+                // Clear entries when entering play mode for fresh data
+                _entries.Clear();
+                UpdateStatistics();
+                
+                // Ensure runtime profiling is enabled
+                RuntimeAtlasProfiler.Enabled = true;
+                
+                Repaint();
+            }
+        }
+
+        private void OnRuntimeProfilerData(ProfileData data)
+        {
+            // Convert RuntimeAtlasProfiler data to ProfileEntry
+            var entry = new ProfileEntry
+            {
+                OperationType = ParseOperationType(data.OperationType),
+                AtlasName = data.AtlasName ?? "Unknown",
+                Details = data.Details ?? "",
+                Timestamp = data.Timestamp,
+                DurationMs = data.DurationMs
+            };
+            
+            OnOperationLogged(entry);
+        }
+
+        private ProfileOperationType ParseOperationType(string opType)
+        {
+            if (string.IsNullOrEmpty(opType)) return ProfileOperationType.Other;
+            
+            if (opType.Contains("Add")) return ProfileOperationType.Add;
+            if (opType.Contains("Remove")) return ProfileOperationType.Remove;
+            if (opType.Contains("Resize")) return ProfileOperationType.Resize;
+            if (opType.Contains("Repack")) return ProfileOperationType.Repack;
+            if (opType.Contains("Clear")) return ProfileOperationType.Clear;
+            if (opType.Contains("Apply")) return ProfileOperationType.Apply;
+            
+            return ProfileOperationType.Other;
         }
 
         private void OnOperationLogged(ProfileEntry entry)
         {
-            if (!_isRecording) return;
-            
             _entries.Add(entry);
             
             // Trim if too many entries
@@ -117,13 +167,13 @@ namespace RuntimeAtlasPacker.Editor
         {
             EditorGUILayout.BeginHorizontal(EditorStyles.toolbar);
             
-            var recordIcon = _isRecording ? "d_Record On" : "d_Record Off";
-            if (GUILayout.Button(new GUIContent(_isRecording ? "Recording" : "Paused", 
-                EditorGUIUtility.IconContent(recordIcon).image), 
-                EditorStyles.toolbarButton, GUILayout.Width(80)))
-            {
-                _isRecording = !_isRecording;
-            }
+            // Status indicator
+            var statusColor = EditorApplication.isPlaying ? Color.green : Color.gray;
+            var oldColor = GUI.backgroundColor;
+            GUI.backgroundColor = statusColor;
+            GUILayout.Label(EditorApplication.isPlaying ? "● Recording" : "○ Waiting for Play Mode", 
+                EditorStyles.toolbarButton, GUILayout.Width(150));
+            GUI.backgroundColor = oldColor;
             
             if (GUILayout.Button("Clear", EditorStyles.toolbarButton, GUILayout.Width(50)))
             {
@@ -273,21 +323,15 @@ namespace RuntimeAtlasPacker.Editor
         public static event Action<ProfileEntry> OnOperationLogged;
         
         private static readonly Stopwatch _stopwatch = new();
-        private static bool _enabled = true;
         
-        public static bool Enabled
-        {
-            get => _enabled;
-            set => _enabled = value;
-        }
+        // Always enabled
+        public static bool Enabled => true;
 
         /// <summary>
         /// Begin timing an operation. Returns a handle to stop timing.
         /// </summary>
         public static ProfileHandle Begin(ProfileOperationType type, string atlasName = null, string details = null)
         {
-            if (!_enabled) return default;
-            
             return new ProfileHandle
             {
                 OperationType = type,
@@ -303,7 +347,7 @@ namespace RuntimeAtlasPacker.Editor
         /// </summary>
         public static void End(ProfileHandle handle)
         {
-            if (!_enabled || handle.StopwatchStart == 0) return;
+            if (handle.StopwatchStart == 0) return;
             
             var elapsed = (Stopwatch.GetTimestamp() - handle.StopwatchStart) * 1000.0 / Stopwatch.Frequency;
             
@@ -324,8 +368,6 @@ namespace RuntimeAtlasPacker.Editor
         /// </summary>
         public static void Log(ProfileOperationType type, double durationMs, string atlasName = null, string details = null)
         {
-            if (!_enabled) return;
-            
             var entry = new ProfileEntry
             {
                 OperationType = type,
