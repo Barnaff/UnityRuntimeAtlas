@@ -12,6 +12,8 @@ All notable changes to this project will be documented in this file.
 - Fixed Graphics.CopyTexture format incompatibility errors (RGB8 vs RGBA8)
 - Added automatic format conversion via RenderTexture when needed
 - Improved texture blitting to handle all format combinations
+- Fixed "Texture is not readable" error when using RenderTexture fallback
+- BlitViaRenderTexture now uses Graphics.CopyTexture to avoid ReadPixels requirement
 
 ### Added
 - BURST_COMPILATION.md documentation for troubleshooting Burst issues

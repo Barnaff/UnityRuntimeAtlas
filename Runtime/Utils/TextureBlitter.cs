@@ -149,33 +149,57 @@ Shader ""Hidden/RuntimeAtlasPacker/Blit""
         /// </summary>
         private static void BlitViaRenderTexture(Texture2D source, Texture2D target, int x, int y)
         {
-            // Create temporary RenderTexture
+            // Create temporary RenderTexture matching target size
             var rt = RenderTexture.GetTemporary(target.width, target.height, 0, RenderTextureFormat.ARGB32, RenderTextureReadWrite.Default);
-
             var prevActive = RenderTexture.active;
 
             try
             {
-                // First, copy existing target content to RT
+                // Copy existing target content to RT (preserves other atlas entries)
                 RenderTexture.active = rt;
                 GL.Clear(true, true, Color.clear);
                 Graphics.Blit(target, rt);
 
-                // Then draw source texture at the specified position
+                // Draw source texture at the specified position
                 GL.PushMatrix();
                 GL.LoadPixelMatrix(0, target.width, target.height, 0);
 
-                // Calculate UV and position rects
                 Rect destRect = new Rect(x, y, source.width, source.height);
-
-                // Draw the source texture
                 Graphics.DrawTexture(destRect, source);
 
                 GL.PopMatrix();
 
-                // Read back from RT to target texture
-                target.ReadPixels(new Rect(0, 0, target.width, target.height), 0, 0);
-                target.Apply(false, false);
+                // Copy back from RT to target
+                // Use Graphics.CopyTexture if possible (doesn't require target to be readable)
+                RenderTexture.active = null;
+
+                if (SystemInfo.copyTextureSupport != CopyTextureSupport.None)
+                {
+                    // GPU copy from RT to target - doesn't require readable
+                    Graphics.CopyTexture(rt, target);
+                }
+                else
+                {
+                    // Fallback: need to make target readable temporarily or use Blit
+                    // This is the absolute fallback for platforms without CopyTexture support
+                    var tempTexture = new Texture2D(target.width, target.height, target.format, false);
+                    RenderTexture.active = rt;
+                    tempTexture.ReadPixels(new Rect(0, 0, rt.width, rt.height), 0, 0);
+                    tempTexture.Apply(false, false);
+                    RenderTexture.active = null;
+
+                    // Now copy from temp to target using CPU
+                    if (target.isReadable)
+                    {
+                        BlitCPU(tempTexture, target, 0, 0);
+                    }
+                    else
+                    {
+                        Debug.LogError("TextureBlitter: Cannot blit - target texture is not readable and CopyTexture is not supported on this platform. Please enable 'Read/Write Enabled' in texture import settings for atlas textures.");
+                    }
+
+                    UnityEngine.Object.DestroyImmediate(tempTexture);
+                }
             }
             finally
             {
