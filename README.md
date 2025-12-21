@@ -401,9 +401,25 @@ Access via Edit > Preferences > Runtime Atlas Packer:
 ## Requirements
 
 - Unity 2021.3 or newer
-- Burst 1.8.0+
 - Collections 1.4.0+
 - Mathematics 1.2.6+
+- Burst 1.6.0+ (optional, for improved performance)
+
+## Troubleshooting
+
+### Burst Compilation Errors
+
+If you encounter errors like `"Burst failed to compile the function pointer"` during atlas generation:
+
+1. **Quick Fix**: Add `DISABLE_BURST_COMPILATION` to **Project Settings > Player > Scripting Define Symbols**
+2. **Alternative**: The package automatically falls back to non-Burst implementations (you'll see a warning but it will still work)
+3. **Details**: See [BURST_COMPILATION.md](BURST_COMPILATION.md) for more information
+
+### Common Issues
+
+- **Textures not packing**: Ensure textures are marked as readable in import settings
+- **Poor packing efficiency**: Use `AtlasBatchProcessor.AnalyzeBatch()` for optimization recommendations
+- **Atlas too large**: Adjust `InitialSize` and `MaxSize` in atlas settings
 
 ## License
 
