@@ -7,297 +7,349 @@ using UnityEditor;
 
 namespace RuntimeAtlasPacker.Editor
 {
-    /// <summary>
-    /// Memory analyzer for runtime atlases.
-    /// </summary>
     public class AtlasMemoryAnalyzer : EditorWindow
     {
-        private Vector2 _scrollPosition;
-        private List<MemoryEntry> _memoryEntries = new();
-        private long _totalMemory;
-        private bool _autoRefresh = true;
-        private double _lastRefreshTime;
+        private List<AtlasInfo> _atlases = new List<AtlasInfo>();
+        private List<GraphPoint> _graphData = new List<GraphPoint>();
+        private const int MAX_GRAPH_POINTS = 200;
         
-        // Sort options
-        private enum SortBy { Name, Size, Entries, FillRatio }
-        private SortBy _sortBy = SortBy.Size;
-        private bool _sortDescending = true;
+        private Vector2 _scrollPos;
+        private Vector2 _previewScrollPos;
+        private bool _showGraph = true;
+        private bool _showPreviews = true;
+        private float _lastUpdateTime;
+        private float _playSessionStartTime;
+        
+        private long _totalMemoryBytes;
+        private int _totalAtlasCount;
+        private int _totalTextureCount;
 
         [MenuItem("Window/Runtime Atlas Packer/Memory Analyzer")]
         public static void ShowWindow()
         {
-            var window = GetWindow<AtlasMemoryAnalyzer>();
-            window.titleContent = new GUIContent("Atlas Memory", EditorGUIUtility.IconContent("d_MemoryProfiler").image);
-            window.minSize = new Vector2(500, 300);
+            var window = GetWindow<AtlasMemoryAnalyzer>("Atlas Memory");
+            window.minSize = new Vector2(700, 500);
             window.Show();
         }
 
         private void OnEnable()
         {
-            RefreshData();
             EditorApplication.update += OnEditorUpdate;
+            EditorApplication.playModeStateChanged += OnPlayModeStateChanged;
+            RuntimeAtlasProfiler.OnOperationLogged += OnProfilerEvent;
+            
+            if (EditorApplication.isPlaying)
+            {
+                _playSessionStartTime = (float)EditorApplication.timeSinceStartup;
+                UpdateAtlasData();
+            }
         }
 
         private void OnDisable()
         {
             EditorApplication.update -= OnEditorUpdate;
+            EditorApplication.playModeStateChanged -= OnPlayModeStateChanged;
+            RuntimeAtlasProfiler.OnOperationLogged -= OnProfilerEvent;
         }
 
-        private void OnEditorUpdate()
+        private void OnPlayModeStateChanged(PlayModeStateChange state)
         {
-            if (_autoRefresh && EditorApplication.timeSinceStartup - _lastRefreshTime > 1.0)
+            if (state == PlayModeStateChange.EnteredPlayMode)
             {
-                RefreshData();
+                _graphData.Clear();
+                _atlases.Clear();
+                _playSessionStartTime = (float)EditorApplication.timeSinceStartup;
+                UpdateAtlasData();
                 Repaint();
             }
         }
 
-        private void RefreshData()
+        private void OnProfilerEvent(ProfileData data)
         {
-            _lastRefreshTime = EditorApplication.timeSinceStartup;
-            _memoryEntries.Clear();
-            _totalMemory = 0;
-            
-            var atlases = GetAllAtlases();
-            
-            foreach (var kvp in atlases)
+            if (EditorApplication.isPlaying)
             {
-                var atlas = kvp.Value;
-                if (atlas?.Texture == null) continue;
-                
-                var entry = new MemoryEntry
-                {
-                    Name = kvp.Key,
-                    Atlas = atlas,
-                    TextureMemory = CalculateTextureMemory(atlas),
-                    EntryCount = atlas.EntryCount,
-                    FillRatio = atlas.FillRatio,
-                    Width = atlas.Width,
-                    Height = atlas.Height,
-                    Format = atlas.Settings.Format
-                };
-                
-                // Estimate overhead
-                entry.OverheadMemory = EstimateOverhead(atlas);
-                entry.TotalMemory = entry.TextureMemory + entry.OverheadMemory;
-                
-                _memoryEntries.Add(entry);
-                _totalMemory += entry.TotalMemory;
+                UpdateAtlasData();
+                Repaint();
             }
-            
-            ApplySort();
         }
 
-        private Dictionary<string, RuntimeAtlas> GetAllAtlases()
+        private void OnEditorUpdate()
         {
-            var result = new Dictionary<string, RuntimeAtlas>();
-            
-            try
+            if (EditorApplication.isPlaying)
             {
-                var type = typeof(AtlasPacker);
-                
-                var defaultField = type.GetField("_defaultAtlas", BindingFlags.NonPublic | BindingFlags.Static);
-                if (defaultField != null)
+                float currentTime = (float)EditorApplication.timeSinceStartup;
+                if (currentTime - _lastUpdateTime > 0.5f)
                 {
-                    var defaultAtlas = defaultField.GetValue(null) as RuntimeAtlas;
-                    if (defaultAtlas != null)
-                        result["[Default]"] = defaultAtlas;
+                    _lastUpdateTime = currentTime;
+                    UpdateAtlasData();
+                    Repaint();
                 }
-                
-                var namedField = type.GetField("_namedAtlases", BindingFlags.NonPublic | BindingFlags.Static);
-                if (namedField != null)
+            }
+        }
+
+        private void UpdateAtlasData()
+        {
+            _atlases.Clear();
+            _totalMemoryBytes = 0;
+            _totalAtlasCount = 0;
+            _totalTextureCount = 0;
+
+            var atlasPackerType = typeof(AtlasPacker);
+            
+            // Get default atlas
+            var defaultField = atlasPackerType.GetField("_defaultAtlas", BindingFlags.NonPublic | BindingFlags.Static);
+            if (defaultField != null)
+            {
+                var defaultAtlas = defaultField.GetValue(null) as RuntimeAtlas;
+                if (defaultAtlas != null && defaultAtlas.Texture != null)
                 {
-                    var namedAtlases = namedField.GetValue(null) as Dictionary<string, RuntimeAtlas>;
-                    if (namedAtlases != null)
+                    AddAtlasInfo("[Default]", defaultAtlas);
+                }
+            }
+            
+            // Get named atlases
+            var namedField = atlasPackerType.GetField("_namedAtlases", BindingFlags.NonPublic | BindingFlags.Static);
+            if (namedField != null)
+            {
+                var dict = namedField.GetValue(null) as Dictionary<string, RuntimeAtlas>;
+                if (dict != null)
+                {
+                    foreach (var kvp in dict)
                     {
-                        foreach (var kvp in namedAtlases)
-                            result[kvp.Key] = kvp.Value;
+                        if (kvp.Value != null && kvp.Value.Texture != null)
+                        {
+                            AddAtlasInfo(kvp.Key, kvp.Value);
+                        }
                     }
                 }
             }
-            catch { }
+
+            // Add to graph
+            float time = (float)EditorApplication.timeSinceStartup - _playSessionStartTime;
+            bool shouldAdd = _graphData.Count == 0 || 
+                           _totalMemoryBytes != _graphData[_graphData.Count - 1].memoryBytes ||
+                           _totalAtlasCount != _graphData[_graphData.Count - 1].atlasCount;
             
-            return result;
+            if (shouldAdd)
+            {
+                _graphData.Add(new GraphPoint
+                {
+                    time = time,
+                    memoryBytes = _totalMemoryBytes,
+                    atlasCount = _totalAtlasCount,
+                    textureCount = _totalTextureCount
+                });
+
+                while (_graphData.Count > MAX_GRAPH_POINTS)
+                {
+                    _graphData.RemoveAt(0);
+                }
+            }
         }
 
-        private long CalculateTextureMemory(RuntimeAtlas atlas)
+        private void AddAtlasInfo(string name, RuntimeAtlas atlas)
         {
-            if (atlas?.Texture == null) return 0;
+            var info = new AtlasInfo
+            {
+                name = name,
+                atlas = atlas,
+                width = atlas.Width,
+                height = atlas.Height,
+                format = atlas.Settings.Format,
+                entryCount = atlas.EntryCount,
+                fillRatio = atlas.FillRatio,
+                texture = atlas.Texture
+            };
+
+            int bpp = GetBytesPerPixel(info.format);
+            long bytes = (long)info.width * info.height * bpp;
+            if (atlas.Settings.GenerateMipMaps) bytes = (long)(bytes * 1.33f);
+
+            info.memoryBytes = bytes;
             
-            int bpp = GetBytesPerPixel(atlas.Settings.Format);
-            long size = (long)atlas.Width * atlas.Height * bpp;
-            
-            if (atlas.Settings.GenerateMipMaps)
-                size = (long)(size * 1.33f);
-            
-            return size;
+            _atlases.Add(info);
+            _totalMemoryBytes += bytes;
+            _totalAtlasCount++;
+            _totalTextureCount += info.entryCount;
         }
 
         private int GetBytesPerPixel(TextureFormat format)
         {
             switch (format)
             {
-                case TextureFormat.Alpha8:
-                case TextureFormat.R8:
-                    return 1;
-                case TextureFormat.RGB565:
-                case TextureFormat.RGBA4444:
-                case TextureFormat.RG16:
-                case TextureFormat.R16:
-                    return 2;
-                case TextureFormat.RGB24:
-                    return 3;
                 case TextureFormat.RGBA32:
                 case TextureFormat.ARGB32:
                 case TextureFormat.BGRA32:
-                case TextureFormat.RGBAFloat:
                     return 4;
+                case TextureFormat.RGB24:
+                    return 3;
+                case TextureFormat.RGBA4444:
+                case TextureFormat.RGB565:
+                    return 2;
+                case TextureFormat.Alpha8:
+                case TextureFormat.R8:
+                    return 1;
                 default:
                     return 4;
-            }
-        }
-
-        private long EstimateOverhead(RuntimeAtlas atlas)
-        {
-            // Rough estimate of native container and dictionary overhead
-            long overhead = 0;
-            
-            // Dictionary entries
-            overhead += atlas.EntryCount * 64; // Rough estimate per entry
-            
-            // Packing algorithm data
-            overhead += atlas.Width * 4; // Free rects estimate
-            
-            return overhead;
-        }
-
-        private void ApplySort()
-        {
-            switch (_sortBy)
-            {
-                case SortBy.Name:
-                    _memoryEntries = _sortDescending 
-                        ? _memoryEntries.OrderByDescending(e => e.Name).ToList()
-                        : _memoryEntries.OrderBy(e => e.Name).ToList();
-                    break;
-                case SortBy.Size:
-                    _memoryEntries = _sortDescending 
-                        ? _memoryEntries.OrderByDescending(e => e.TotalMemory).ToList()
-                        : _memoryEntries.OrderBy(e => e.TotalMemory).ToList();
-                    break;
-                case SortBy.Entries:
-                    _memoryEntries = _sortDescending 
-                        ? _memoryEntries.OrderByDescending(e => e.EntryCount).ToList()
-                        : _memoryEntries.OrderBy(e => e.EntryCount).ToList();
-                    break;
-                case SortBy.FillRatio:
-                    _memoryEntries = _sortDescending 
-                        ? _memoryEntries.OrderByDescending(e => e.FillRatio).ToList()
-                        : _memoryEntries.OrderBy(e => e.FillRatio).ToList();
-                    break;
             }
         }
 
         private void OnGUI()
         {
             DrawToolbar();
-            DrawSummary();
-            DrawMemoryTable();
-            DrawRecommendations();
+            
+            if (!EditorApplication.isPlaying)
+            {
+                EditorGUILayout.Space(50);
+                EditorGUILayout.HelpBox("Press Play to start tracking atlas allocations", MessageType.Info);
+                return;
+            }
+
+            if (_atlases.Count == 0)
+            {
+                EditorGUILayout.Space(50);
+                EditorGUILayout.HelpBox("No atlases detected. Create atlases using AtlasPacker to see tracking.", MessageType.Warning);
+                return;
+            }
+
+            DrawStats();
+            
+            if (_showGraph && _graphData.Count > 1)
+            {
+                DrawGraph();
+            }
+            
+            DrawAtlasList();
+            
+            if (_showPreviews)
+            {
+                DrawAtlasPreviews();
+            }
         }
 
         private void DrawToolbar()
         {
             EditorGUILayout.BeginHorizontal(EditorStyles.toolbar);
             
+            var color = EditorApplication.isPlaying ? Color.green : Color.gray;
+            var oldBg = GUI.backgroundColor;
+            GUI.backgroundColor = color;
+            GUILayout.Label(EditorApplication.isPlaying ? "● TRACKING" : "○ STOPPED", EditorStyles.toolbarButton, GUILayout.Width(100));
+            GUI.backgroundColor = oldBg;
+
+            GUILayout.FlexibleSpace();
+
+            _showGraph = GUILayout.Toggle(_showGraph, "Graph", EditorStyles.toolbarButton);
+            _showPreviews = GUILayout.Toggle(_showPreviews, "Previews", EditorStyles.toolbarButton);
+            
             if (GUILayout.Button("Refresh", EditorStyles.toolbarButton, GUILayout.Width(60)))
             {
-                RefreshData();
+                UpdateAtlasData();
             }
             
-            _autoRefresh = GUILayout.Toggle(_autoRefresh, "Auto", EditorStyles.toolbarButton, GUILayout.Width(45));
-            
-            GUILayout.FlexibleSpace();
-            
-            EditorGUILayout.LabelField("Sort by:", GUILayout.Width(50));
-            var newSort = (SortBy)EditorGUILayout.EnumPopup(_sortBy, EditorStyles.toolbarPopup, GUILayout.Width(80));
-            if (newSort != _sortBy)
+            if (GUILayout.Button("Clear", EditorStyles.toolbarButton, GUILayout.Width(50)))
             {
-                _sortBy = newSort;
-                ApplySort();
+                _graphData.Clear();
             }
-            
-            if (GUILayout.Button(_sortDescending ? "▼" : "▲", EditorStyles.toolbarButton, GUILayout.Width(25)))
-            {
-                _sortDescending = !_sortDescending;
-                ApplySort();
-            }
-            
+
             EditorGUILayout.EndHorizontal();
         }
 
-        private void DrawSummary()
+        private void DrawStats()
         {
             EditorGUILayout.BeginHorizontal();
             
-            DrawSummaryBox("Total Atlases", _memoryEntries.Count.ToString());
-            DrawSummaryBox("Total Memory", FormatBytes(_totalMemory));
-            DrawSummaryBox("Total Entries", _memoryEntries.Sum(e => e.EntryCount).ToString());
-            DrawSummaryBox("Avg Fill", _memoryEntries.Count > 0 
-                ? $"{_memoryEntries.Average(e => e.FillRatio):P0}" 
-                : "-");
+            DrawStatBox("Atlases", _totalAtlasCount.ToString(), new Color(0.3f, 0.7f, 1f));
+            DrawStatBox("Memory", FormatBytes(_totalMemoryBytes), new Color(1f, 0.7f, 0.3f));
+            DrawStatBox("Textures", _totalTextureCount.ToString(), new Color(0.3f, 1f, 0.5f));
+            
+            float avgFill = _atlases.Count > 0 ? _atlases.Average(a => a.fillRatio) : 0;
+            DrawStatBox("Avg Fill", $"{avgFill * 100:F0}%", new Color(1f, 0.3f, 0.7f));
             
             EditorGUILayout.EndHorizontal();
+            EditorGUILayout.Space(5);
         }
 
-        private void DrawSummaryBox(string label, string value)
+        private void DrawStatBox(string label, string value, Color color)
         {
-            EditorGUILayout.BeginVertical("box", GUILayout.Width(100));
-            EditorGUILayout.LabelField(label, EditorStyles.centeredGreyMiniLabel);
-            EditorGUILayout.LabelField(value, new GUIStyle(EditorStyles.boldLabel) { alignment = TextAnchor.MiddleCenter });
+            var oldBg = GUI.backgroundColor;
+            GUI.backgroundColor = color * 0.3f;
+            
+            EditorGUILayout.BeginVertical("box", GUILayout.MinWidth(120));
+            EditorGUILayout.LabelField(label, EditorStyles.miniLabel);
+            
+            var style = new GUIStyle(EditorStyles.boldLabel) { fontSize = 14 };
+            style.normal.textColor = color;
+            EditorGUILayout.LabelField(value, style);
+            
             EditorGUILayout.EndVertical();
+            GUI.backgroundColor = oldBg;
         }
 
-        private void DrawMemoryTable()
+        private void DrawGraph()
         {
-            // Header
+            EditorGUILayout.LabelField("Memory Over Time", EditorStyles.boldLabel);
+            
+            var rect = GUILayoutUtility.GetRect(100, 100, GUILayout.ExpandWidth(true));
+            EditorGUI.DrawRect(rect, new Color(0.1f, 0.1f, 0.1f));
+            
+            if (_graphData.Count < 2) return;
+
+            long maxMem = _graphData.Max(p => p.memoryBytes);
+            if (maxMem == 0) return;
+
+            Handles.BeginGUI();
+            Handles.color = new Color(0.3f, 0.7f, 1f);
+            
+            var points = new List<Vector3>();
+            for (int i = 0; i < _graphData.Count; i++)
+            {
+                float x = rect.x + (rect.width * i / (_graphData.Count - 1));
+                float y = rect.yMax - (rect.height * _graphData[i].memoryBytes / maxMem);
+                points.Add(new Vector3(x, y, 0));
+            }
+            
+            Handles.DrawAAPolyLine(3f, points.ToArray());
+            Handles.EndGUI();
+            
+            GUI.Label(new Rect(rect.x + 5, rect.y + 5, 200, 20), 
+                $"Peak: {FormatBytes(maxMem)}", 
+                new GUIStyle(EditorStyles.miniLabel) { normal = new GUIStyleState { textColor = Color.white } });
+            
+            EditorGUILayout.Space(5);
+        }
+
+        private void DrawAtlasList()
+        {
+            EditorGUILayout.LabelField("Atlas Details", EditorStyles.boldLabel);
+            
             EditorGUILayout.BeginHorizontal("box");
-            EditorGUILayout.LabelField("Atlas", EditorStyles.boldLabel, GUILayout.Width(120));
+            EditorGUILayout.LabelField("Name", EditorStyles.boldLabel, GUILayout.Width(120));
             EditorGUILayout.LabelField("Size", EditorStyles.boldLabel, GUILayout.Width(80));
-            EditorGUILayout.LabelField("Entries", EditorStyles.boldLabel, GUILayout.Width(60));
+            EditorGUILayout.LabelField("Format", EditorStyles.boldLabel, GUILayout.Width(70));
+            EditorGUILayout.LabelField("Textures", EditorStyles.boldLabel, GUILayout.Width(60));
             EditorGUILayout.LabelField("Fill", EditorStyles.boldLabel, GUILayout.Width(50));
-            EditorGUILayout.LabelField("Texture Mem", EditorStyles.boldLabel, GUILayout.Width(80));
-            EditorGUILayout.LabelField("Overhead", EditorStyles.boldLabel, GUILayout.Width(70));
-            EditorGUILayout.LabelField("Total", EditorStyles.boldLabel, GUILayout.Width(80));
-            EditorGUILayout.LabelField("", GUILayout.ExpandWidth(true)); // Memory bar
+            EditorGUILayout.LabelField("Memory", EditorStyles.boldLabel, GUILayout.ExpandWidth(true));
             EditorGUILayout.EndHorizontal();
             
-            _scrollPosition = EditorGUILayout.BeginScrollView(_scrollPosition);
+            _scrollPos = EditorGUILayout.BeginScrollView(_scrollPos, GUILayout.Height(150));
             
-            foreach (var entry in _memoryEntries)
+            foreach (var atlas in _atlases)
             {
                 EditorGUILayout.BeginHorizontal("box");
                 
-                EditorGUILayout.LabelField(entry.Name, GUILayout.Width(120));
-                EditorGUILayout.LabelField($"{entry.Width}x{entry.Height}", GUILayout.Width(80));
-                EditorGUILayout.LabelField(entry.EntryCount.ToString(), GUILayout.Width(60));
+                EditorGUILayout.LabelField(atlas.name, GUILayout.Width(120));
+                EditorGUILayout.LabelField($"{atlas.width}x{atlas.height}", GUILayout.Width(80));
+                EditorGUILayout.LabelField(atlas.format.ToString(), GUILayout.Width(70));
+                EditorGUILayout.LabelField(atlas.entryCount.ToString(), GUILayout.Width(60));
                 
-                // Fill ratio with color
-                var fillColor = entry.FillRatio > 0.8f ? Color.green : 
-                               entry.FillRatio > 0.5f ? Color.yellow : Color.red;
-                var oldColor = GUI.color;
-                GUI.color = fillColor;
-                EditorGUILayout.LabelField($"{entry.FillRatio:P0}", GUILayout.Width(50));
-                GUI.color = oldColor;
+                var fillColor = atlas.fillRatio >= 0.8f ? Color.green : atlas.fillRatio >= 0.5f ? Color.yellow : Color.red;
+                var oldColor = GUI.contentColor;
+                GUI.contentColor = fillColor;
+                EditorGUILayout.LabelField($"{atlas.fillRatio * 100:F0}%", GUILayout.Width(50));
+                GUI.contentColor = oldColor;
                 
-                EditorGUILayout.LabelField(FormatBytes(entry.TextureMemory), GUILayout.Width(80));
-                EditorGUILayout.LabelField(FormatBytes(entry.OverheadMemory), GUILayout.Width(70));
-                EditorGUILayout.LabelField(FormatBytes(entry.TotalMemory), GUILayout.Width(80));
-                
-                // Memory proportion bar
-                float proportion = _totalMemory > 0 ? (float)entry.TotalMemory / _totalMemory : 0;
-                var barRect = GUILayoutUtility.GetRect(100, 16, GUILayout.ExpandWidth(true));
-                EditorGUI.ProgressBar(barRect, proportion, $"{proportion:P0}");
+                EditorGUILayout.LabelField(FormatBytes(atlas.memoryBytes), GUILayout.ExpandWidth(true));
                 
                 EditorGUILayout.EndHorizontal();
             }
@@ -305,150 +357,65 @@ namespace RuntimeAtlasPacker.Editor
             EditorGUILayout.EndScrollView();
         }
 
-        private void DrawRecommendations()
+        private void DrawAtlasPreviews()
         {
-            EditorGUILayout.Space(10);
-            EditorGUILayout.LabelField("Recommendations", EditorStyles.boldLabel);
+            EditorGUILayout.Space(5);
+            EditorGUILayout.LabelField("Atlas Texture Previews", EditorStyles.boldLabel);
             
-            bool hasRecommendations = false;
+            _previewScrollPos = EditorGUILayout.BeginScrollView(_previewScrollPos, GUILayout.ExpandHeight(true));
             
-            foreach (var entry in _memoryEntries)
+            foreach (var atlas in _atlases)
             {
-                // Low fill ratio warning
-                if (entry.FillRatio < 0.5f && entry.EntryCount > 0)
-                {
-                    hasRecommendations = true;
-                    EditorGUILayout.BeginHorizontal();
-                    EditorGUILayout.HelpBox($"Atlas '{entry.Name}' has low fill ratio ({entry.FillRatio:P0}). Consider repacking or using a smaller initial size.", MessageType.Warning);
-                    if (GUILayout.Button("Repack", GUILayout.Width(60), GUILayout.Height(38)))
-                    {
-                        entry.Atlas.Repack();
-                        RefreshData();
-                    }
-                    EditorGUILayout.EndHorizontal();
-                }
+                if (atlas.texture == null) continue;
                 
-                // Large atlas warning
-                if (entry.TextureMemory > 16 * 1024 * 1024) // > 16MB
-                {
-                    hasRecommendations = true;
-                    EditorGUILayout.HelpBox($"Atlas '{entry.Name}' is using {FormatBytes(entry.TextureMemory)} of texture memory. Consider splitting into multiple atlases.", MessageType.Warning);
-                }
+                EditorGUILayout.BeginVertical("box");
                 
-                // Empty atlas
-                if (entry.EntryCount == 0)
-                {
-                    hasRecommendations = true;
-                    EditorGUILayout.HelpBox($"Atlas '{entry.Name}' has no entries. Consider disposing it.", MessageType.Info);
-                }
+                EditorGUILayout.LabelField($"{atlas.name} - {atlas.width}x{atlas.height}", EditorStyles.boldLabel);
+                EditorGUILayout.LabelField($"Textures: {atlas.entryCount}, Fill: {atlas.fillRatio * 100:F0}%, Memory: {FormatBytes(atlas.memoryBytes)}");
+                
+                float previewSize = Mathf.Min(300, position.width - 40);
+                float aspect = (float)atlas.height / atlas.width;
+                float previewHeight = previewSize * aspect;
+                
+                var previewRect = GUILayoutUtility.GetRect(previewSize, previewHeight);
+                EditorGUI.DrawPreviewTexture(previewRect, atlas.texture, null, ScaleMode.ScaleToFit);
+                
+                EditorGUILayout.Space(5);
+                EditorGUILayout.EndVertical();
+                EditorGUILayout.Space(10);
             }
             
-            if (!hasRecommendations)
-            {
-                EditorGUILayout.HelpBox("No optimization recommendations at this time.", MessageType.Info);
-            }
+            EditorGUILayout.EndScrollView();
         }
 
         private string FormatBytes(long bytes)
         {
-            string[] sizes = { "B", "KB", "MB", "GB" };
-            int order = 0;
-            double size = bytes;
-            
-            while (size >= 1024 && order < sizes.Length - 1)
-            {
-                order++;
-                size /= 1024;
-            }
-            
-            return $"{size:0.##} {sizes[order]}";
+            if (bytes < 1024) return $"{bytes} B";
+            if (bytes < 1024 * 1024) return $"{bytes / 1024f:F2} KB";
+            if (bytes < 1024 * 1024 * 1024) return $"{bytes / (1024f * 1024f):F2} MB";
+            return $"{bytes / (1024f * 1024f * 1024f):F2} GB";
         }
 
-        private struct MemoryEntry
+        private class AtlasInfo
         {
-            public string Name;
-            public RuntimeAtlas Atlas;
-            public long TextureMemory;
-            public long OverheadMemory;
-            public long TotalMemory;
-            public int EntryCount;
-            public float FillRatio;
-            public int Width;
-            public int Height;
-            public TextureFormat Format;
+            public string name;
+            public RuntimeAtlas atlas;
+            public int width;
+            public int height;
+            public TextureFormat format;
+            public int entryCount;
+            public float fillRatio;
+            public long memoryBytes;
+            public Texture2D texture;
         }
-    }
 
-    /// <summary>
-    /// Preferences for the Runtime Atlas Packer editor tools.
-    /// </summary>
-    public static class AtlasPreferences
-    {
-        private const string GizmosEnabledKey = "RuntimeAtlasPacker_GizmosEnabled";
-        private const string AutoRefreshKey = "RuntimeAtlasPacker_AutoRefresh";
-        private const string ProfilerEnabledKey = "RuntimeAtlasPacker_ProfilerEnabled";
-
-        public static bool GizmosEnabled
+        private struct GraphPoint
         {
-            get => EditorPrefs.GetBool(GizmosEnabledKey, false);
-            set => EditorPrefs.SetBool(GizmosEnabledKey, value);
+            public float time;
+            public long memoryBytes;
+            public int atlasCount;
+            public int textureCount;
         }
-
-        public static bool AutoRefresh
-        {
-            get => EditorPrefs.GetBool(AutoRefreshKey, true);
-            set => EditorPrefs.SetBool(AutoRefreshKey, value);
-        }
-
-        public static bool ProfilerEnabled
-        {
-            get => EditorPrefs.GetBool(ProfilerEnabledKey, true);
-            set => EditorPrefs.SetBool(ProfilerEnabledKey, value);
-        }
-
-#if UNITY_2019_1_OR_NEWER
-        [SettingsProvider]
-        public static SettingsProvider CreateSettingsProvider()
-        {
-            var provider = new SettingsProvider("Preferences/Runtime Atlas Packer", SettingsScope.User)
-            {
-                label = "Runtime Atlas Packer",
-                guiHandler = (searchContext) =>
-                {
-                    EditorGUILayout.Space(10);
-                    
-                    EditorGUILayout.LabelField("Editor Tools", EditorStyles.boldLabel);
-                    GizmosEnabled = EditorGUILayout.Toggle("Show Scene Gizmos", GizmosEnabled);
-                    AutoRefresh = EditorGUILayout.Toggle("Auto-Refresh Debug Windows", AutoRefresh);
-                    ProfilerEnabled = EditorGUILayout.Toggle("Enable Profiler", ProfilerEnabled);
-                    
-                    EditorGUILayout.Space(20);
-                    
-                    EditorGUILayout.LabelField("Quick Actions", EditorStyles.boldLabel);
-                    
-                    EditorGUILayout.BeginHorizontal();
-                    if (GUILayout.Button("Open Debug Window"))
-                        AtlasDebugWindow.ShowWindow();
-                    if (GUILayout.Button("Open Profiler"))
-                        AtlasProfilerWindow.ShowWindow();
-                    if (GUILayout.Button("Open Memory Analyzer"))
-                        AtlasMemoryAnalyzer.ShowWindow();
-                    EditorGUILayout.EndHorizontal();
-                    
-                    EditorGUILayout.Space(10);
-                    
-                    EditorGUILayout.BeginHorizontal();
-                    if (GUILayout.Button("Open Texture Picker"))
-                        AtlasTexturePicker.ShowWindow();
-                    if (GUILayout.Button("Open Batch Import Wizard"))
-                        AtlasBatchImportWizard.ShowWizard();
-                    EditorGUILayout.EndHorizontal();
-                },
-                keywords = new HashSet<string>(new[] { "Atlas", "Texture", "Packer", "Runtime", "Sprite" })
-            };
-
-            return provider;
-        }
-#endif
     }
 }
+

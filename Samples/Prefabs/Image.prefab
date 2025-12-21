@@ -10,7 +10,7 @@ GameObject:
   m_Component:
   - component: {fileID: 4652288560764194970}
   - component: {fileID: 1920420004658491975}
-  - component: {fileID: 294453006924003627}
+  - component: {fileID: 1989465168071563319}
   m_Layer: 5
   m_Name: Image
   m_TagString: Untagged
@@ -45,7 +45,7 @@ CanvasRenderer:
   m_PrefabAsset: {fileID: 0}
   m_GameObject: {fileID: 3929262783527703184}
   m_CullTransparentMesh: 1
---- !u!114 &294453006924003627
+--- !u!114 &1989465168071563319
 MonoBehaviour:
   m_ObjectHideFlags: 0
   m_CorrespondingSourceObject: {fileID: 0}
@@ -54,7 +54,7 @@ MonoBehaviour:
   m_GameObject: {fileID: 3929262783527703184}
   m_Enabled: 1
   m_EditorHideFlags: 0
-  m_Script: {fileID: 11500000, guid: fe87c0e1cc204ed48ad3b37840f39efc, type: 3}
+  m_Script: {fileID: 11500000, guid: fa1c8a471464f4b7b8f0654891a7112b, type: 3}
   m_Name: 
   m_EditorClassIdentifier: 
   m_Material: {fileID: 0}
@@ -65,13 +65,9 @@ MonoBehaviour:
   m_OnCullStateChanged:
     m_PersistentCalls:
       m_Calls: []
-  m_Sprite: {fileID: 0}
-  m_Type: 0
-  m_PreserveAspect: 0
-  m_FillCenter: 1
-  m_FillMethod: 4
-  m_FillAmount: 1
-  m_FillClockwise: 1
-  m_FillOrigin: 0
-  m_UseSpriteMesh: 0
-  m_PixelsPerUnitMultiplier: 1
+  _pixelsPerUnit: 100
+  _preserveAspect: 0
+  _autoPackOnAssign: 1
+  _targetAtlasName: 
+  _imageType: 0
+  _fillCenter: 1

@@ -66,7 +66,8 @@ namespace RuntimeAtlasPacker.Samples
         {
             if (texture != null)
             {
-                return _atlas.Add(texture);
+                var (addResult, atlasEntry) = _atlas.Add(texture);
+                return atlasEntry; // May be null if failed
             }
 
             // Create colored placeholder
@@ -80,7 +81,8 @@ namespace RuntimeAtlasPacker.Samples
             placeholder.Apply();
             placeholder.name = name;
             
-            return _atlas.Add(placeholder);
+            var (result, entry) = _atlas.Add(placeholder);
+            return entry; // May be null if failed
         }
 
         private void Update()

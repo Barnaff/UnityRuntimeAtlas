@@ -1,5 +1,7 @@
 using System;
+using System.Collections;
 using System.Collections.Generic;
+using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
 using UnityEngine;
@@ -9,129 +11,284 @@ using RuntimeAtlasPacker;
 namespace RuntimeAtlasPacker.Samples
 {
     /// <summary>
-    /// Example demonstrating downloading images from URLs and packing them into atlases.
-    /// Uses placeholder image services for demo purposes.
+    /// Example demonstrating downloading images from URLs and dynamically adding/removing them from atlases.
+    /// Supports batch downloads and automatically creates new atlases when the current one is full.
     /// </summary>
     public class WebDownloadExample : MonoBehaviour
     {
-        [Header("Download Settings")]
-        [Tooltip("Number of images to download")]
-        public int imageCount = 10;
+        [Header("Initial Settings")]
+        [Tooltip("Number of images to download initially")]
+        public int initialImageCount = 5;
         
         [Tooltip("Image size in pixels")]
         public int imageSize = 128;
         
-        [Header("Display")]
-        public Transform spriteContainer;
-        public float spriteSpacing = 1.5f;
+        [Header("Dynamic Timer")]
+        [Tooltip("Time in seconds between adding new images")]
+        public float addImageInterval = 3f;
         
-        [Header("UI Mode (Optional)")]
+        [Tooltip("Time in seconds between removing images")]
+        public float removeImageInterval = 5f;
+        
+        [Tooltip("Enable automatic adding of images")]
+        public bool autoAddImages = true;
+        
+        [Tooltip("Enable automatic removing of images")]
+        public bool autoRemoveImages = true;
+        
+        [Tooltip("Maximum number of images to keep")]
+        public int maxImages = 30;
+        
+        [Header("Batch Download")]
+        [Tooltip("Number of downloads before doing a batch")]
+        public int downloadsBeforeBatch = 3;
+        
+        [Tooltip("Number of images to download in a batch")]
+        public int batchSize = 5;
+        
+        [Header("Display")]
         public Transform uiContainer;
         public GameObject uiImagePrefab;
+        
+        [Header("Atlas Settings")]
+        [Tooltip("Maximum atlas texture size")]
+        public int maxAtlasSize = 1024;
 
-        private RuntimeAtlas _atlas;
-        private List<AtlasEntry> _entries = new();
-        private List<GameObject> _spawnedObjects = new();
+        private List<ImageData> _imageDataList = new();
         private CancellationTokenSource _cts;
+        private int _imageCounter = 0;
+        private int _downloadsSinceLastBatch = 0;
 
-        // Image placeholder services that provide random images
-        private static readonly string[] ImageServices = new[]
+        private class ImageData
         {
-            "https://picsum.photos/{0}/{1}?random={2}",           // Lorem Picsum - random photos
-            "https://placekitten.com/{0}/{1}?image={2}",          // Placekitten - cat images
-            "https://placedog.net/{0}/{1}?id={2}",                // Placedog - dog images
-            "https://loremflickr.com/{0}/{1}?random={2}",         // Lorem Flickr - random photos
-        };
+            public AtlasEntry Entry;
+            public GameObject GameObject;
+        }
 
         private void Start()
         {
             _cts = new CancellationTokenSource();
             
-            // Create atlas for downloaded images
-            _atlas = new RuntimeAtlas(new AtlasSettings
-            {
-                InitialSize = 512,
-                MaxSize = 2048,
-                Padding = 2,
-                Format = TextureFormat.RGBA32,
-                Algorithm = PackingAlgorithm.MaxRects,
-                GrowthStrategy = GrowthStrategy.Double
-            });
+            // Configure default atlas with custom max size
+            var settings = AtlasSettings.Default;
+            settings.MaxSize = maxAtlasSize;
+            settings.InitialSize = Mathf.Min(512, maxAtlasSize);
+            
+            // Pre-initialize the default atlas with our settings
+            var defaultAtlas = AtlasPacker.Default;
+            Debug.Log($"[WebDownload] Configured atlas with MaxSize: {maxAtlasSize}");
 
-            // Start downloading
-            _ = DownloadAndDisplayImages();
+            // Start with initial images
+            _ = LoadInitialImages();
+            
+            // Start dynamic add/remove timers
+            if (autoAddImages && addImageInterval > 0)
+            {
+                StartCoroutine(AddImageTimer());
+            }
+            
+            if (autoRemoveImages && removeImageInterval > 0)
+            {
+                StartCoroutine(RemoveImageTimer());
+            }
         }
 
-        private async Task DownloadAndDisplayImages()
+        private async Task LoadInitialImages()
         {
-            Debug.Log($"Starting download of {imageCount} images...");
+            Debug.Log($"[WebDownload] Loading {initialImageCount} initial images...");
 
+            for (int i = 0; i < initialImageCount; i++)
+            {
+                await AddNewImage();
+            }
+
+            int overflowCount = AtlasPacker.GetDefaultOverflowCount();
+            Debug.Log($"[WebDownload] Initialized with {overflowCount + 1} atlas(es), Total images: {_imageDataList.Count}");
+        }
+
+        private IEnumerator AddImageTimer()
+        {
+            while (true)
+            {
+                yield return new WaitForSeconds(addImageInterval);
+                
+                if (_imageDataList.Count < maxImages)
+                {
+                    _downloadsSinceLastBatch++;
+                    
+                    // Every few downloads, do a batch instead
+                    if (_downloadsSinceLastBatch >= downloadsBeforeBatch)
+                    {
+                        Debug.Log($"[WebDownload] Starting batch download of {batchSize} images...");
+                        _ = AddBatchImages(batchSize);
+                        _downloadsSinceLastBatch = 0;
+                    }
+                    else
+                    {
+                        _ = AddNewImage();
+                    }
+                }
+            }
+        }
+
+        private IEnumerator RemoveImageTimer()
+        {
+            while (true)
+            {
+                yield return new WaitForSeconds(removeImageInterval);
+                
+                if (_imageDataList.Count > 0)
+                {
+                    RemoveRandomImage();
+                }
+            }
+        }
+
+        private async Task AddNewImage()
+        {
+            string url = GetRandomImageUrl(_imageCounter++);
+            var texture = await DownloadImageAsync(url, _cts.Token);
+            
+            if (texture == null) return;
+
+            // Use AtlasPacker - it will automatically create overflow atlases if needed
+            var entry = AtlasPacker.Pack(texture);
+            
+            Destroy(texture);
+
+            if (entry == null)
+            {
+                Debug.LogWarning($"[WebDownload] Failed to pack texture - this shouldn't happen with auto-overflow!");
+                return;
+            }
+
+            var go = CreateImageObject(entry);
+            
+            _imageDataList.Add(new ImageData
+            {
+                Entry = entry,
+                GameObject = go
+            });
+
+            int overflowCount = AtlasPacker.GetDefaultOverflowCount();
+            Debug.Log($"[WebDownload] Added image {_imageCounter} - " +
+                     $"Total atlases: {overflowCount + 1}, " +
+                     $"Total images: {_imageDataList.Count}");
+        }
+        
+        private async Task AddBatchImages(int count)
+        {
+            Debug.Log($"[WebDownload] Starting batch download of {count} images...");
+            
+            // Download all textures concurrently
             var downloadTasks = new List<Task<Texture2D>>();
             
-            for (int i = 0; i < imageCount; i++)
+            for (int i = 0; i < count; i++)
             {
-                // Use different image services for variety
-                string url = GetRandomImageUrl(i);
+                if (_imageDataList.Count + i >= maxImages) break;
+                
+                string url = GetRandomImageUrl(_imageCounter++);
                 downloadTasks.Add(DownloadImageAsync(url, _cts.Token));
             }
-
-            // Wait for all downloads
-            Texture2D[] textures;
-            try
-            {
-                textures = await Task.WhenAll(downloadTasks);
-            }
-            catch (OperationCanceledException)
-            {
-                Debug.Log("Download cancelled");
-                return;
-            }
-
+            
+            var textures = await Task.WhenAll(downloadTasks);
+            
             // Filter out failed downloads
-            var validTextures = new List<Texture2D>();
-            foreach (var tex in textures)
+            var validTextures = textures.Where(t => t != null).ToArray();
+            
+            if (validTextures.Length == 0)
             {
-                if (tex != null)
-                    validTextures.Add(tex);
-            }
-
-            Debug.Log($"Successfully downloaded {validTextures.Count}/{imageCount} images");
-
-            if (validTextures.Count == 0)
-            {
-                Debug.LogWarning("No images downloaded. Check your internet connection.");
+                Debug.LogWarning("[WebDownload] Batch download failed - no valid textures");
                 return;
-            }
-
-            // Pack all textures into atlas
-            var entries = _atlas.AddBatch(validTextures.ToArray());
-            _entries.AddRange(entries);
-
-            Debug.Log($"Atlas created: {_atlas.Width}x{_atlas.Height}, Fill: {_atlas.FillRatio:P1}");
-
-            // Display as sprites or UI
-            if (spriteContainer != null)
-            {
-                DisplayAsSprites(entries);
             }
             
-            if (uiContainer != null && uiImagePrefab != null)
-            {
-                DisplayAsUI(entries);
-            }
-
-            // Cleanup downloaded textures (they're now in the atlas)
+            Debug.Log($"[WebDownload] Successfully downloaded {validTextures.Length}/{count} textures. Adding as batch...");
+            
+            // Use AtlasPacker.PackBatch - it will automatically handle overflow
+            var entries = AtlasPacker.PackBatch(validTextures);
+            
+            // Clean up textures
             foreach (var tex in validTextures)
             {
                 Destroy(tex);
             }
+            
+            if (entries == null || entries.Length == 0)
+            {
+                Debug.LogWarning("[WebDownload] Batch pack failed - this shouldn't happen with auto-overflow!");
+                return;
+            }
+            
+            // Create UI objects for all entries
+            foreach (var entry in entries)
+            {
+                var go = CreateImageObject(entry);
+                _imageDataList.Add(new ImageData
+                {
+                    Entry = entry,
+                    GameObject = go
+                });
+            }
+            
+            int overflowCount = AtlasPacker.GetDefaultOverflowCount();
+            Debug.Log($"[WebDownload] Batch complete! " +
+                     $"Total atlases: {overflowCount + 1}, " +
+                     $"Total images: {_imageDataList.Count}");
+        }
+
+        private void RemoveRandomImage()
+        {
+            if (_imageDataList.Count == 0) return;
+
+            int index = UnityEngine.Random.Range(0, _imageDataList.Count);
+            var imageData = _imageDataList[index];
+
+            if (imageData.GameObject != null)
+            {
+                Destroy(imageData.GameObject);
+            }
+
+            if (imageData.Entry != null)
+            {
+                // Entry will be removed from its atlas automatically
+                imageData.Entry = null;
+            }
+
+            _imageDataList.RemoveAt(index);
+
+            int overflowCount = AtlasPacker.GetDefaultOverflowCount();
+            Debug.Log($"[WebDownload] Removed image - " +
+                     $"Total atlases: {overflowCount + 1}, " +
+                     $"Total images: {_imageDataList.Count}");
+        }
+
+        private GameObject CreateImageObject(AtlasEntry entry)
+        {
+            if (uiContainer == null || uiImagePrefab == null)
+            {
+                Debug.LogWarning("UI Container or Image Prefab not set!");
+                return null;
+            }
+
+            var go = Instantiate(uiImagePrefab, uiContainer);
+            go.name = $"WebImage_{_imageCounter}";
+
+            var atlasImage = go.GetComponent<AtlasImage>();
+            if (atlasImage == null)
+            {
+                atlasImage = go.AddComponent<AtlasImage>();
+            }
+            atlasImage.SetEntry(entry);
+
+            return go;
         }
 
         private string GetRandomImageUrl(int index)
         {
-            // Use Lorem Picsum as primary (most reliable)
-            // Format: https://picsum.photos/width/height?random=seed
-            return $"https://picsum.photos/{imageSize}/{imageSize}?random={index + UnityEngine.Random.Range(1000, 9999)}";
+            // Generate various sizes around 256±50px
+            int variation = UnityEngine.Random.Range(-50, 51);
+            int size = Mathf.Clamp(imageSize + variation, 128, 512);
+            return $"https://picsum.photos/{size}/{size}?random={index + UnityEngine.Random.Range(1000, 9999)}";
         }
 
         private async Task<Texture2D> DownloadImageAsync(string url, CancellationToken ct)
@@ -159,7 +316,7 @@ namespace RuntimeAtlasPacker.Samples
                 }
 
                 var texture = DownloadHandlerTexture.GetContent(request);
-                texture.name = $"Downloaded_{url.GetHashCode():X8}";
+                texture.name = $"WebImage_{url.GetHashCode():X8}";
                 return texture;
             }
             catch (Exception e)
@@ -169,89 +326,23 @@ namespace RuntimeAtlasPacker.Samples
             }
         }
 
-        private void DisplayAsSprites(AtlasEntry[] entries)
-        {
-            int columns = Mathf.CeilToInt(Mathf.Sqrt(entries.Length));
-            
-            for (int i = 0; i < entries.Length; i++)
-            {
-                int row = i / columns;
-                int col = i % columns;
-                
-                var go = new GameObject($"WebSprite_{i}");
-                go.transform.SetParent(spriteContainer);
-                go.transform.localPosition = new Vector3(col * spriteSpacing, -row * spriteSpacing, 0);
-                
-                // Use AtlasSpriteRenderer for auto-updating
-                var renderer = go.AddComponent<AtlasSpriteRenderer>();
-                renderer.PixelsPerUnit = imageSize;
-                renderer.SetEntry(entries[i]);
-                
-                _spawnedObjects.Add(go);
-            }
-        }
-
-        private void DisplayAsUI(AtlasEntry[] entries)
-        {
-            for (int i = 0; i < entries.Length; i++)
-            {
-                var go = Instantiate(uiImagePrefab, uiContainer);
-                go.name = $"WebImage_{i}";
-                
-                // Try to get AtlasImage or AtlasRawImage
-                var atlasImage = go.GetComponent<AtlasImage>();
-                if (atlasImage != null)
-                {
-                    atlasImage.SetEntry(entries[i]);
-                }
-                else
-                {
-                    var rawImage = go.GetComponent<AtlasRawImage>();
-                    if (rawImage != null)
-                    {
-                        rawImage.SetEntry(entries[i]);
-                    }
-                }
-                
-                _spawnedObjects.Add(go);
-            }
-        }
-
-        /// <summary>
-        /// Download and add a single image at runtime.
-        /// </summary>
-        public async Task<AtlasEntry> DownloadAndAddImage(string url)
-        {
-            var texture = await DownloadImageAsync(url, _cts.Token);
-            if (texture == null) return null;
-            
-            var entry = _atlas.Add(texture);
-            _entries.Add(entry);
-            
-            Destroy(texture);
-            return entry;
-        }
-
-        /// <summary>
-        /// Download a random placeholder image and add to atlas.
-        /// </summary>
-        public async Task<AtlasEntry> DownloadRandomImage(int width = 128, int height = 128)
-        {
-            string url = $"https://picsum.photos/{width}/{height}?random={UnityEngine.Random.Range(1, 99999)}";
-            return await DownloadAndAddImage(url);
-        }
 
         private void OnDestroy()
         {
             _cts?.Cancel();
             _cts?.Dispose();
             
-            foreach (var go in _spawnedObjects)
+            foreach (var imageData in _imageDataList)
             {
-                if (go != null) Destroy(go);
+                if (imageData.GameObject != null)
+                {
+                    Destroy(imageData.GameObject);
+                }
             }
             
-            _atlas?.Dispose();
+            // AtlasPacker manages atlas disposal
+            // Uncomment if you want to dispose all atlases on destroy:
+            // AtlasPacker.DisposeAll();
         }
     }
 
@@ -317,8 +408,15 @@ namespace RuntimeAtlasPacker.Samples
                     ? AtlasPacker.Default
                     : AtlasPacker.GetOrCreate(targetAtlasName);
 
-                _entry = atlas.Add(texture);
+                var (result, entry) = atlas.Add(texture);
+                _entry = entry;
                 Destroy(texture);
+                
+                if (result != AddResult.Success || _entry == null)
+                {
+                    Debug.LogWarning($"[SingleImageLoader] Failed to pack texture: {result}");
+                    return;
+                }
 
                 // Apply to any atlas component on this GameObject
                 var spriteRenderer = GetComponent<AtlasSpriteRenderer>();

@@ -1,8 +1,8 @@
 using System;
 using System.Collections.Generic;
+using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
-using Unity.Collections;
 using UnityEngine;
 
 namespace RuntimeAtlasPacker
@@ -13,8 +13,11 @@ namespace RuntimeAtlasPacker
     /// </summary>
     public sealed class RuntimeAtlas : IDisposable
     {
-        private Texture2D _texture;
-        private IPackingAlgorithm _packer;
+        // Multi-page texture support
+        private List<Texture2D> _textures;
+        private List<IPackingAlgorithm> _packers;
+        private int _currentPageIndex;
+        
         private readonly AtlasSettings _settings;
         private readonly Dictionary<int, AtlasEntry> _entries;
         private readonly Queue<int> _recycledIds;
@@ -23,14 +26,25 @@ namespace RuntimeAtlasPacker
         private bool _isDirty;
         private int _version;
 
-        /// <summary>The atlas texture.</summary>
-        public Texture2D Texture => _texture;
+        /// <summary>The primary atlas texture (page 0).</summary>
+        public Texture2D Texture => _textures != null && _textures.Count > 0 ? _textures[0] : null;
 
-        /// <summary>Current atlas width.</summary>
-        public int Width => _texture?.width ?? 0;
+        /// <summary>Get a specific texture page by index.</summary>
+        public Texture2D GetTexture(int pageIndex)
+        {
+            if (_textures == null || pageIndex < 0 || pageIndex >= _textures.Count)
+                return null;
+            return _textures[pageIndex];
+        }
 
-        /// <summary>Current atlas height.</summary>
-        public int Height => _texture?.height ?? 0;
+        /// <summary>Number of texture pages in this atlas.</summary>
+        public int PageCount => _textures?.Count ?? 0;
+
+        /// <summary>Current atlas width (all pages have same size).</summary>
+        public int Width => _textures != null && _textures.Count > 0 && _textures[0] != null ? _textures[0].width : 0;
+
+        /// <summary>Current atlas height (all pages have same size).</summary>
+        public int Height => _textures != null && _textures.Count > 0 && _textures[0] != null ? _textures[0].height : 0;
 
         /// <summary>Number of entries in the atlas.</summary>
         public int EntryCount => _entries.Count;
@@ -38,8 +52,20 @@ namespace RuntimeAtlasPacker
         /// <summary>Atlas version, incremented on each modification.</summary>
         public int Version => _version;
 
-        /// <summary>Current fill ratio (0-1).</summary>
-        public float FillRatio => _packer?.GetFillRatio() ?? 0f;
+        /// <summary>Current fill ratio (0-1) - average across all pages.</summary>
+        public float FillRatio
+        {
+            get
+            {
+                if (_packers == null || _packers.Count == 0) return 0f;
+                float sum = 0f;
+                foreach (var packer in _packers)
+                {
+                    sum += packer?.GetFillRatio() ?? 0f;
+                }
+                return sum / _packers.Count;
+            }
+        }
 
         /// <summary>Settings used for this atlas.</summary>
         public AtlasSettings Settings => _settings;
@@ -60,153 +86,164 @@ namespace RuntimeAtlasPacker
         /// </summary>
         public RuntimeAtlas(AtlasSettings settings)
         {
+            // Validate and fix settings if needed
+            if (settings.Format == 0 || !SystemInfo.SupportsTextureFormat(settings.Format))
+            {
+                Debug.LogWarning($"[RuntimeAtlas] Invalid or unsupported texture format {settings.Format}. Using RGBA32 instead.");
+                settings.Format = TextureFormat.RGBA32;
+            }
+            
             _settings = settings;
             _entries = new Dictionary<int, AtlasEntry>(64);
             _recycledIds = new Queue<int>(16);
+            _textures = new List<Texture2D>();
+            _packers = new List<IPackingAlgorithm>();
+            _currentPageIndex = 0;
             
-            // Create packer
-            _packer = settings.Algorithm switch
+            // Create first page
+            CreateNewPage();
+        }
+
+        private void CreateNewPage()
+        {
+            int pageIndex = _textures.Count;
+            
+            // Create packer for this page
+            IPackingAlgorithm packer = _settings.Algorithm switch
             {
                 PackingAlgorithm.MaxRects => new MaxRectsAlgorithm(),
                 PackingAlgorithm.Skyline => new SkylineAlgorithm(),
                 _ => new MaxRectsAlgorithm()
             };
             
-            // Initialize
-            CreateTexture(settings.InitialSize, settings.InitialSize);
-            _packer.Initialize(settings.InitialSize, settings.InitialSize);
-        }
-
-        private void CreateTexture(int width, int height)
-        {
-            _texture = new Texture2D(width, height, _settings.Format, _settings.GenerateMipMaps);
-            _texture.filterMode = _settings.FilterMode;
-            _texture.wrapMode = TextureWrapMode.Clamp;
+            // Initialize packer
+            packer.Initialize(_settings.InitialSize, _settings.InitialSize);
+            _packers.Add(packer);
+            
+            // Create texture
+            var texture = new Texture2D(_settings.InitialSize, _settings.InitialSize, _settings.Format, _settings.GenerateMipMaps);
+            texture.filterMode = _settings.FilterMode;
+            texture.wrapMode = TextureWrapMode.Clamp;
+            texture.name = $"RuntimeAtlas_Page{pageIndex}";
             
             // Clear to transparent
-            var clearPixels = new Color32[width * height];
-            _texture.SetPixels32(clearPixels);
-            _texture.Apply(false, !_settings.Readable);
+            var clearPixels = new Color32[_settings.InitialSize * _settings.InitialSize];
+            texture.SetPixels32(clearPixels);
+            texture.Apply(false, false);
+            
+            _textures.Add(texture);
+            _currentPageIndex = pageIndex;
+            
+            Debug.Log($"[RuntimeAtlas] Created new page {pageIndex}: {_settings.InitialSize}x{_settings.InitialSize}");
         }
 
         /// <summary>
         /// Add a texture to the atlas.
         /// </summary>
-        /// <returns>An AtlasEntry reference that auto-updates when the atlas changes.</returns>
-        public AtlasEntry Add(Texture2D texture)
+        /// <returns>A tuple containing the result status and an AtlasEntry reference (null if not successful).</returns>
+        public (AddResult result, AtlasEntry entry) Add(Texture2D texture)
         {
-            if (_isDisposed) throw new ObjectDisposedException(nameof(RuntimeAtlas));
-            if (texture == null) throw new ArgumentNullException(nameof(texture));
-
-            int width = texture.width + _settings.Padding * 2;
-            int height = texture.height + _settings.Padding * 2;
-
-            // Try to pack
-            if (!TryPackWithGrowth(width, height, out var packedRect))
+            if (_isDisposed)
             {
-                throw new InvalidOperationException($"Cannot fit texture {texture.width}x{texture.height} in atlas (max size: {_settings.MaxSize})");
+                Debug.LogWarning("[RuntimeAtlas.Add] Atlas is disposed");
+                return (AddResult.Failed, null);
+            }
+            
+            if (texture == null)
+            {
+                Debug.LogWarning("[RuntimeAtlas.Add] Null texture provided");
+                return (AddResult.InvalidTexture, null);
             }
 
-            // Adjust for padding
-            var contentRect = new RectInt(
-                packedRect.x + _settings.Padding,
-                packedRect.y + _settings.Padding,
-                texture.width,
-                texture.height
-            );
+            var profiler = RuntimeAtlasProfiler.Begin("Add", GetAtlasName(), $"{texture.name} ({texture.width}x{texture.height})");
 
-            // Blit texture to atlas
-            TextureBlitter.Blit(texture, _texture, contentRect.x, contentRect.y);
+            Debug.Log($"[RuntimeAtlas] Add: Packing '{texture.name}': {texture.width}x{texture.height}");
+
+            // Use internal method for packing
+            var (result, entry) = AddInternal(texture);
             
-            // Calculate UV
-            var uvRect = new Rect(
-                (float)contentRect.x / _texture.width,
-                (float)contentRect.y / _texture.height,
-                (float)contentRect.width / _texture.width,
-                (float)contentRect.height / _texture.height
-            );
-
-            // Create entry
-            int id = GetNextId();
-            var entry = new AtlasEntry(this, id, contentRect, uvRect);
-            _entries[id] = entry;
+            if (result != AddResult.Success)
+            {
+                Debug.LogWarning($"[RuntimeAtlas] Add: Failed with result: {result}");
+                RuntimeAtlasProfiler.End(profiler);
+                return (result, null);
+            }
             
-            _version++;
-            _isDirty = true;
+            // Apply texture changes immediately for single adds to the page that was modified
+            if (entry != null)
+            {
+                try
+                {
+                    var pageTexture = _textures[entry.TextureIndex];
+                    pageTexture.Apply(false, false);
+                    _isDirty = false;
+                }
+                catch (UnityException ex)
+                {
+                    Debug.LogWarning($"[RuntimeAtlas] Could not apply texture changes: {ex.Message}");
+                }
+            }
 
-            return entry;
+            // Validate no overlaps
+            ValidateNoOverlaps();
+            
+            Debug.Log($"[RuntimeAtlas] Add: Complete. Entry ID: {entry.Id}, Page: {entry.TextureIndex}, Total entries: {_entries.Count}");
+
+            RuntimeAtlasProfiler.End(profiler);
+            return (AddResult.Success, entry);
         }
-
+        
         /// <summary>
-        /// Add a texture to the atlas asynchronously.
+        /// Validate that no entries overlap with each other.
         /// </summary>
-        public async Task<AtlasEntry> AddAsync(Texture2D texture, CancellationToken cancellationToken = default)
+        private void ValidateNoOverlaps()
         {
-            if (_isDisposed) throw new ObjectDisposedException(nameof(RuntimeAtlas));
-            if (texture == null) throw new ArgumentNullException(nameof(texture));
-
-            // Move to background thread for packing calculation
-            int width = texture.width + _settings.Padding * 2;
-            int height = texture.height + _settings.Padding * 2;
-
-            RectInt packedRect = default;
-            bool success = false;
-
-            await Task.Run(() =>
+#if UNITY_EDITOR || DEVELOPMENT_BUILD
+            var entries = _entries.Values.ToArray();
+            for (int i = 0; i < entries.Length; i++)
             {
-                cancellationToken.ThrowIfCancellationRequested();
-                success = TryPackWithGrowthThreadSafe(width, height, out packedRect);
-            }, cancellationToken);
-
-            if (!success)
-            {
-                throw new InvalidOperationException($"Cannot fit texture {texture.width}x{texture.height} in atlas");
+                for (int j = i + 1; j < entries.Length; j++)
+                {
+                    var rect1 = entries[i].PixelRect;
+                    var rect2 = entries[j].PixelRect;
+                    
+                    // Check if rects overlap
+                    if (!(rect1.xMax <= rect2.xMin || rect2.xMax <= rect1.xMin ||
+                          rect1.yMax <= rect2.yMin || rect2.yMax <= rect1.yMin))
+                    {
+                        Debug.LogError($"[RuntimeAtlas] OVERLAP DETECTED! '{entries[i].Name}' [{rect1}] overlaps with '{entries[j].Name}' [{rect2}]");
+                    }
+                }
             }
-
-            // Back on main thread for texture operations
-            return FinalizeAdd(texture, packedRect);
-        }
-
-        private AtlasEntry FinalizeAdd(Texture2D texture, RectInt packedRect)
-        {
-            var contentRect = new RectInt(
-                packedRect.x + _settings.Padding,
-                packedRect.y + _settings.Padding,
-                texture.width,
-                texture.height
-            );
-
-            TextureBlitter.Blit(texture, _texture, contentRect.x, contentRect.y);
-
-            var uvRect = new Rect(
-                (float)contentRect.x / _texture.width,
-                (float)contentRect.y / _texture.height,
-                (float)contentRect.width / _texture.width,
-                (float)contentRect.height / _texture.height
-            );
-
-            int id = GetNextId();
-            var entry = new AtlasEntry(this, id, contentRect, uvRect);
-            _entries[id] = entry;
-
-            _version++;
-            _isDirty = true;
-
-            return entry;
+#endif
         }
 
         /// <summary>
         /// Add multiple textures to the atlas in a single batch.
         /// More efficient than adding one at a time.
+        /// Returns only successfully added entries (skips failures).
         /// </summary>
         public AtlasEntry[] AddBatch(Texture2D[] textures)
         {
-            if (_isDisposed) throw new ObjectDisposedException(nameof(RuntimeAtlas));
-            if (textures == null) throw new ArgumentNullException(nameof(textures));
+            if (_isDisposed)
+            {
+                Debug.LogWarning("[RuntimeAtlas.AddBatch] Atlas is disposed");
+                return Array.Empty<AtlasEntry>();
+            }
+            
+            if (textures == null || textures.Length == 0)
+            {
+                Debug.LogWarning("[RuntimeAtlas.AddBatch] No textures provided");
+                return Array.Empty<AtlasEntry>();
+            }
 
-            var entries = new AtlasEntry[textures.Length];
+            var profiler = RuntimeAtlasProfiler.Begin("AddBatch", GetAtlasName(), $"{textures.Length} textures");
 
-            // Sort by height descending for better packing
+            Debug.Log($"[RuntimeAtlas] AddBatch: Starting batch of {textures.Length} textures");
+            
+            var successfulEntries = new List<AtlasEntry>();
+
+            // Sort by area descending for better packing
             var sorted = new (int index, Texture2D tex, int area)[textures.Length];
             for (int i = 0; i < textures.Length; i++)
             {
@@ -214,41 +251,269 @@ namespace RuntimeAtlasPacker
             }
             Array.Sort(sorted, (a, b) => b.area.CompareTo(a.area));
 
-            // Pack all
+            // Pack all textures WITHOUT applying after each one
+            int successCount = 0;
+            int failCount = 0;
             foreach (var (index, tex, _) in sorted)
             {
-                entries[index] = Add(tex);
+                var (result, entry) = AddInternal(tex);
+                if (result == AddResult.Success && entry != null)
+                {
+                    successfulEntries.Add(entry);
+                    successCount++;
+                    Debug.Log($"[RuntimeAtlas] Batch [{index}]: Added '{tex.name}' -> Entry ID {entry.Id}");
+                }
+                else
+                {
+                    failCount++;
+                    Debug.LogWarning($"[RuntimeAtlas] Batch [{index}]: Failed to add '{tex.name}' -> Result: {result}");
+                    
+                    // If atlas is full, stop trying to add more
+                    if (result == AddResult.Full)
+                    {
+                        Debug.LogWarning($"[RuntimeAtlas] AddBatch: Atlas full after {successCount} textures. Stopping batch.");
+                        break;
+                    }
+                }
             }
 
-            return entries;
+            // Apply once at the end for efficiency (apply all modified pages)
+            if (successCount > 0)
+            {
+                try
+                {
+                    Debug.Log($"[RuntimeAtlas] AddBatch: Applying texture changes for {successCount} successful textures across {_textures.Count} pages");
+                    foreach (var texture in _textures)
+                    {
+                        texture.Apply(false, false);
+                    }
+                    _isDirty = false;
+                }
+                catch (UnityException ex)
+                {
+                    Debug.LogError($"[RuntimeAtlas] Failed to apply batch changes: {ex.Message}");
+                }
+
+                // Validate at the end
+                ValidateNoOverlaps();
+            }
+            
+            Debug.Log($"[RuntimeAtlas] AddBatch: Complete. Added: {successCount}, Failed: {failCount}, Total entries in atlas: {_entries.Count}");
+
+            RuntimeAtlasProfiler.End(profiler);
+            return successfulEntries.ToArray();
+        }
+        
+        /// <summary>
+        /// Internal add method that doesn't call Apply - for batch operations
+        /// Automatically creates new page if current page is full.
+        /// </summary>
+        private (AddResult result, AtlasEntry entry) AddInternal(Texture2D texture)
+        {
+            if (texture == null)
+            {
+                Debug.LogWarning("[RuntimeAtlas.AddInternal] NULL TEXTURE passed!");
+                return (AddResult.InvalidTexture, null);
+            }
+
+            Debug.Log($"[RuntimeAtlas.AddInternal] ===== Starting pack for '{texture.name}' =====");
+            Debug.Log($"[RuntimeAtlas.AddInternal] Texture size: {texture.width}x{texture.height}");
+            Debug.Log($"[RuntimeAtlas.AddInternal] Padding: {_settings.Padding}");
+
+            int width = texture.width + _settings.Padding * 2;
+            int height = texture.height + _settings.Padding * 2;
+
+            // Check if texture is too large to ever fit
+            if (texture.width > _settings.MaxSize || texture.height > _settings.MaxSize)
+            {
+                Debug.LogWarning($"[RuntimeAtlas.AddInternal] Texture '{texture.name}' ({texture.width}x{texture.height}) exceeds MaxSize ({_settings.MaxSize})");
+                return (AddResult.TooLarge, null);
+            }
+
+            Debug.Log($"[RuntimeAtlas.AddInternal] With padding: {width}x{height}");
+            Debug.Log($"[RuntimeAtlas.AddInternal] Current page: {_currentPageIndex}, Pages: {_textures.Count}");
+            Debug.Log($"[RuntimeAtlas.AddInternal] Current entries: {_entries.Count}");
+
+            // Try to pack in current page
+            int pageIndex = _currentPageIndex;
+            bool packed = TryPackInPage(pageIndex, width, height, out var packedRect);
+            
+            if (!packed)
+            {
+                Debug.Log($"[RuntimeAtlas.AddInternal] Current page {pageIndex} is full. Creating new page...");
+                
+                // Current page is full, create new page
+                CreateNewPage();
+                pageIndex = _currentPageIndex;
+                
+                // Try packing in new page
+                packed = TryPackInPage(pageIndex, width, height, out packedRect);
+                
+                if (!packed)
+                {
+                    Debug.LogWarning($"[RuntimeAtlas.AddInternal] Failed to pack even in new page!");
+                    return (AddResult.Full, null);
+                }
+            }
+
+            var currentTexture = _textures[pageIndex];
+            Debug.Log($"[RuntimeAtlas.AddInternal] Packed successfully in page {pageIndex} at: x={packedRect.x}, y={packedRect.y}, w={packedRect.width}, h={packedRect.height}");
+
+            // Adjust for padding - contentRect is the actual visible area
+            var contentRect = new RectInt(
+                packedRect.x + _settings.Padding,
+                packedRect.y + _settings.Padding,
+                texture.width,
+                texture.height
+            );
+
+            Debug.Log($"[RuntimeAtlas.AddInternal] Content rect (removing padding): {contentRect}");
+
+            // Blit texture to atlas page
+            try
+            {
+                TextureBlitter.Blit(texture, currentTexture, contentRect.x, contentRect.y);
+                Debug.Log($"[RuntimeAtlas.AddInternal] Blit successful to page {pageIndex}");
+            }
+            catch (Exception ex)
+            {
+                Debug.LogError($"[RuntimeAtlas.AddInternal] BLIT FAILED for '{texture.name}': {ex.Message}");
+                return (AddResult.Failed, null);
+            }
+            
+            // Calculate UV
+            var uvRect = new Rect(
+                (float)contentRect.x / currentTexture.width,
+                (float)contentRect.y / currentTexture.height,
+                (float)contentRect.width / currentTexture.width,
+                (float)contentRect.height / currentTexture.height
+            );
+
+            Debug.Log($"[RuntimeAtlas.AddInternal] UV calculated: ({uvRect.x:F4}, {uvRect.y:F4}, {uvRect.width:F4}, {uvRect.height:F4})");
+
+            // Create entry with texture index
+            int id = GetNextId();
+            var entry = new AtlasEntry(this, id, pageIndex, contentRect, uvRect, texture.name);
+            _entries[id] = entry;
+            
+            Debug.Log($"[RuntimeAtlas.AddInternal] ===== COMPLETE: Entry ID {id} created for '{texture.name}' on page {pageIndex}. Total entries: {_entries.Count} =====");
+            
+            _version++;
+            _isDirty = true;
+
+            return (AddResult.Success, entry);
+        }
+
+        private bool TryPackInPage(int pageIndex, int width, int height, out RectInt packedRect)
+        {
+            packedRect = default;
+            if (pageIndex < 0 || pageIndex >= _packers.Count)
+                return false;
+
+            var packer = _packers[pageIndex];
+            var texture = _textures[pageIndex];
+            
+            // Try to pack at current size
+            if (packer.TryPack(width, height, out packedRect))
+            {
+                return true;
+            }
+
+            // Try growing the page (up to MaxSize)
+            if (_settings.GrowthStrategy == GrowthStrategy.None)
+            {
+                return false;
+            }
+
+            int currentSize = texture.width;
+            while (currentSize < _settings.MaxSize)
+            {
+                int newSize = _settings.GrowthStrategy == GrowthStrategy.Double 
+                    ? currentSize * 2 
+                    : currentSize + currentSize / 2;
+                    
+                newSize = Mathf.Min(newSize, _settings.MaxSize);
+                
+                if (newSize == currentSize)
+                    break;
+
+                Debug.Log($"[RuntimeAtlas] Attempting to grow page {pageIndex} from {currentSize} to {newSize}");
+                
+                if (TryGrowPage(pageIndex, newSize))
+                {
+                    if (packer.TryPack(width, height, out packedRect))
+                    {
+                        return true;
+                    }
+                }
+                
+                currentSize = newSize;
+            }
+
+            return false;
+        }
+
+        private bool TryGrowPage(int pageIndex, int newSize)
+        {
+            if (pageIndex < 0 || pageIndex >= _textures.Count)
+                return false;
+
+            var oldTexture = _textures[pageIndex];
+            int oldSize = oldTexture.width;
+            
+            if (newSize <= oldSize || newSize > _settings.MaxSize)
+            {
+                Debug.LogError($"[TryGrowPage] Invalid new size {newSize} (old: {oldSize}, max: {_settings.MaxSize})");
+                return false;
+            }
+
+            Debug.Log($"[TryGrowPage] Growing page {pageIndex} from {oldSize}x{oldSize} to {newSize}x{newSize}");
+
+            // Create new larger texture
+            var newTexture = new Texture2D(newSize, newSize, _settings.Format, _settings.GenerateMipMaps);
+            newTexture.filterMode = _settings.FilterMode;
+            newTexture.wrapMode = TextureWrapMode.Clamp;
+            newTexture.name = $"RuntimeAtlas_Page{pageIndex}";
+
+            // Clear to transparent
+            var clearPixels = new Color32[newSize * newSize];
+            newTexture.SetPixels32(clearPixels);
+            newTexture.Apply(false, false);
+
+            // Copy old texture data
+            Graphics.CopyTexture(oldTexture, 0, 0, 0, 0, oldSize, oldSize, newTexture, 0, 0, 0, 0);
+
+            // Update packer
+            _packers[pageIndex].Resize(newSize, newSize);
+
+            // Replace texture
+            UnityEngine.Object.Destroy(oldTexture);
+            _textures[pageIndex] = newTexture;
+
+            // Update UVs for all entries on this page
+            foreach (var entry in _entries.Values)
+            {
+                if (entry.TextureIndex == pageIndex)
+                {
+                    var uvRect = new Rect(
+                        (float)entry.PixelRect.x / newSize,
+                        (float)entry.PixelRect.y / newSize,
+                        (float)entry.PixelRect.width / newSize,
+                        (float)entry.PixelRect.height / newSize
+                    );
+                    entry.UpdateRect(entry.PixelRect, uvRect);
+                    OnEntryUpdated?.Invoke(this, entry);
+                }
+            }
+
+            Debug.Log($"[TryGrowPage] Page {pageIndex} grown successfully to {newSize}x{newSize}");
+            OnAtlasResized?.Invoke(this);
+
+            return true;
         }
 
         /// <summary>
         /// Add multiple textures asynchronously.
-        /// </summary>
-        public async Task<AtlasEntry[]> AddBatchAsync(Texture2D[] textures, CancellationToken cancellationToken = default)
-        {
-            if (_isDisposed) throw new ObjectDisposedException(nameof(RuntimeAtlas));
-            if (textures == null) throw new ArgumentNullException(nameof(textures));
-
-            var entries = new AtlasEntry[textures.Length];
-
-            // Sort by area descending
-            var sorted = new (int index, Texture2D tex, int area)[textures.Length];
-            for (int i = 0; i < textures.Length; i++)
-            {
-                sorted[i] = (i, textures[i], textures[i].width * textures[i].height);
-            }
-            Array.Sort(sorted, (a, b) => b.area.CompareTo(a.area));
-
-            foreach (var (index, tex, _) in sorted)
-            {
-                cancellationToken.ThrowIfCancellationRequested();
-                entries[index] = await AddAsync(tex, cancellationToken);
-            }
-
-            return entries;
-        }
 
         /// <summary>
         /// Remove an entry from the atlas.
@@ -269,20 +534,26 @@ namespace RuntimeAtlasPacker
             if (!_entries.TryGetValue(id, out var entry))
                 return false;
 
-            // Free the space in the packer
+            var profiler = RuntimeAtlasProfiler.Begin("Remove", GetAtlasName(), $"Entry ID: {id}");
+
             var fullRect = new RectInt(
                 entry.PixelRect.x - _settings.Padding,
                 entry.PixelRect.y - _settings.Padding,
                 entry.PixelRect.width + _settings.Padding * 2,
                 entry.PixelRect.height + _settings.Padding * 2
             );
-            
-            _packer.Free(fullRect);
+
+            // Free the space in the appropriate packer
+            int pageIndex = entry.TextureIndex;
+            if (pageIndex >= 0 && pageIndex < _packers.Count)
+            {
+                _packers[pageIndex].Free(fullRect);
+            }
 
             // Clear the texture region (optional, helps debugging)
-            if (_settings.Readable)
+            if (_settings.Readable && pageIndex >= 0 && pageIndex < _textures.Count)
             {
-                TextureBlitter.ClearRegion(_texture, entry.PixelRect);
+                TextureBlitter.ClearRegion(_textures[pageIndex], entry.PixelRect);
             }
 
             // Cleanup
@@ -293,9 +564,10 @@ namespace RuntimeAtlasPacker
             _version++;
             _isDirty = true;
 
+            RuntimeAtlasProfiler.End(profiler);
+            
             return true;
         }
-
         /// <summary>
         /// Check if an entry exists in the atlas.
         /// </summary>
@@ -317,157 +589,15 @@ namespace RuntimeAtlasPacker
         /// <summary>
         /// Force a full repack of the atlas.
         /// Useful after many removes to reclaim fragmented space.
+        /// Note: Currently not supported for multi-page atlases.
         /// </summary>
         public void Repack()
         {
             if (_isDisposed) throw new ObjectDisposedException(nameof(RuntimeAtlas));
             if (_entries.Count == 0) return;
 
-            // Store all current entries with their pixel data
-            var entryData = new List<(AtlasEntry entry, Texture2D texture)>();
-            
-            foreach (var entry in _entries.Values)
-            {
-                var tex = TextureBlitter.CopyRegion(_texture, entry.PixelRect);
-                entryData.Add((entry, tex));
-            }
-
-            // Reset packer
-            _packer.Clear();
-            
-            // Clear texture
-            var clearPixels = new Color32[_texture.width * _texture.height];
-            _texture.SetPixels32(clearPixels);
-
-            // Re-add all entries sorted by area
-            entryData.Sort((a, b) => 
-                (b.entry.Width * b.entry.Height).CompareTo(a.entry.Width * a.entry.Height));
-
-            foreach (var (entry, tex) in entryData)
-            {
-                int width = tex.width + _settings.Padding * 2;
-                int height = tex.height + _settings.Padding * 2;
-
-                if (!_packer.TryPack(width, height, out var packedRect))
-                {
-                    // This shouldn't happen if we haven't grown
-                    Debug.LogError($"Repack failed for entry {entry.Id}");
-                    UnityEngine.Object.Destroy(tex);
-                    continue;
-                }
-
-                var contentRect = new RectInt(
-                    packedRect.x + _settings.Padding,
-                    packedRect.y + _settings.Padding,
-                    tex.width,
-                    tex.height
-                );
-
-                TextureBlitter.Blit(tex, _texture, contentRect.x, contentRect.y);
-
-                var uvRect = new Rect(
-                    (float)contentRect.x / _texture.width,
-                    (float)contentRect.y / _texture.height,
-                    (float)contentRect.width / _texture.width,
-                    (float)contentRect.height / _texture.height
-                );
-
-                entry.UpdateRect(contentRect, uvRect);
-                OnEntryUpdated?.Invoke(this, entry);
-
-                UnityEngine.Object.Destroy(tex);
-            }
-
-            _texture.Apply(false, !_settings.Readable);
-            _version++;
-        }
-
-        private bool TryPackWithGrowth(int width, int height, out RectInt result)
-        {
-            if (_packer.TryPack(width, height, out result))
-                return true;
-
-            if (_settings.GrowthStrategy == GrowthStrategy.None)
-                return false;
-
-            // Try to grow
-            while (!_packer.TryPack(width, height, out result))
-            {
-                if (!TryGrow())
-                    return false;
-            }
-
-            return true;
-        }
-
-        private bool TryPackWithGrowthThreadSafe(int width, int height, out RectInt result)
-        {
-            lock (_packer)
-            {
-                return TryPackWithGrowth(width, height, out result);
-            }
-        }
-
-        private bool TryGrow()
-        {
-            int currentSize = Mathf.Max(_texture.width, _texture.height);
-            int newSize;
-
-            switch (_settings.GrowthStrategy)
-            {
-                case GrowthStrategy.Double:
-                    newSize = currentSize * 2;
-                    break;
-                case GrowthStrategy.Grow50Percent:
-                    newSize = Mathf.CeilToInt(currentSize * 1.5f);
-                    break;
-                default:
-                    return false;
-            }
-
-            // Round to power of 2
-            newSize = Mathf.NextPowerOfTwo(newSize);
-
-            if (newSize > _settings.MaxSize)
-                return false;
-
-            Resize(newSize, newSize);
-            return true;
-        }
-
-        private void Resize(int newWidth, int newHeight)
-        {
-            var oldTexture = _texture;
-            
-            // Create new texture
-            _texture = TextureBlitter.CreateResized(oldTexture, newWidth, newHeight, 
-                _settings.Format, _settings.GenerateMipMaps);
-            _texture.filterMode = _settings.FilterMode;
-            
-            // Update packer
-            _packer.Resize(newWidth, newHeight);
-
-            // Update all entry UVs
-            foreach (var entry in _entries.Values)
-            {
-                var uvRect = new Rect(
-                    (float)entry.PixelRect.x / newWidth,
-                    (float)entry.PixelRect.y / newHeight,
-                    (float)entry.PixelRect.width / newWidth,
-                    (float)entry.PixelRect.height / newHeight
-                );
-                entry.UpdateRect(entry.PixelRect, uvRect);
-                OnEntryUpdated?.Invoke(this, entry);
-            }
-
-            // Cleanup old texture
-            if (Application.isPlaying)
-                UnityEngine.Object.Destroy(oldTexture);
-            else
-                UnityEngine.Object.DestroyImmediate(oldTexture);
-
-            _version++;
-            OnAtlasResized?.Invoke(this);
+            Debug.LogWarning("[RuntimeAtlas] Repack is not yet implemented for multi-page atlases. This operation is skipped.");
+            // TODO: Implement per-page repacking for multi-page atlases
         }
 
         private int GetNextId()
@@ -477,6 +607,11 @@ namespace RuntimeAtlasPacker
             return _nextId++;
         }
 
+        private string GetAtlasName()
+        {
+            return _textures != null && _textures.Count > 0 && _textures[0] != null ? _textures[0].name : "RuntimeAtlas";
+        }
+
         /// <summary>
         /// Apply pending changes to the texture.
         /// Call this after batching multiple operations.
@@ -484,7 +619,17 @@ namespace RuntimeAtlasPacker
         public void Apply()
         {
             if (!_isDirty) return;
-            _texture.Apply(_settings.GenerateMipMaps, !_settings.Readable);
+            try
+            {
+                foreach (var texture in _textures)
+                {
+                    texture.Apply(_settings.GenerateMipMaps, false);
+                }
+            }
+            catch (UnityException ex)
+            {
+                Debug.LogWarning($"[RuntimeAtlas] Could not apply texture changes: {ex.Message}");
+            }
             _isDirty = false;
         }
 
@@ -499,16 +644,30 @@ namespace RuntimeAtlasPacker
             }
             _entries.Clear();
 
-            _packer?.Dispose();
-            _packer = null;
-
-            if (_texture != null)
+            // Dispose all packers
+            if (_packers != null)
             {
-                if (Application.isPlaying)
-                    UnityEngine.Object.Destroy(_texture);
-                else
-                    UnityEngine.Object.DestroyImmediate(_texture);
-                _texture = null;
+                foreach (var packer in _packers)
+                {
+                    packer?.Dispose();
+                }
+                _packers.Clear();
+            }
+
+            // Dispose all textures
+            if (_textures != null)
+            {
+                foreach (var texture in _textures)
+                {
+                    if (texture != null)
+                    {
+                        if (Application.isPlaying)
+                            UnityEngine.Object.Destroy(texture);
+                        else
+                            UnityEngine.Object.DestroyImmediate(texture);
+                    }
+                }
+                _textures.Clear();
             }
 
             OnAtlasResized = null;

@@ -6,10 +6,13 @@ using Unity.Mathematics;
 namespace RuntimeAtlasPacker
 {
     /// <summary>
-    /// Burst-compiled job for batch rectangle packing.
+    /// Job for batch rectangle packing.
     /// Use for packing many rectangles at once with maximum performance.
+    /// Note: Burst compilation is optional - will work without it but slower.
     /// </summary>
-    [BurstCompile]
+#if ENABLE_BURST_COMPILATION
+    [BurstCompile(CompileSynchronously = false, OptimizeFor = OptimizeFor.Performance)]
+#endif
     public struct BatchPackJob : IJob
     {
         [ReadOnly] public NativeArray<int2> Sizes; // width, height
@@ -156,8 +159,11 @@ namespace RuntimeAtlasPacker
 
     /// <summary>
     /// Job for sorting rectangles by area (descending).
+    /// Note: Burst compilation is optional - will work without it but slower.
     /// </summary>
-    [BurstCompile]
+#if ENABLE_BURST_COMPILATION
+    [BurstCompile(CompileSynchronously = false, OptimizeFor = OptimizeFor.Performance)]
+#endif
     public struct SortByAreaJob : IJob
     {
         public NativeArray<int2> Sizes;
@@ -189,8 +195,11 @@ namespace RuntimeAtlasPacker
 
     /// <summary>
     /// Parallel job for calculating total area of rectangles.
+    /// Note: Burst compilation is optional - will work without it but slower.
     /// </summary>
-    [BurstCompile]
+#if ENABLE_BURST_COMPILATION
+    [BurstCompile(CompileSynchronously = false, OptimizeFor = OptimizeFor.Performance)]
+#endif
     public struct CalculateTotalAreaJob : IJobParallelFor
     {
         [ReadOnly] public NativeArray<int2> Sizes;

@@ -185,7 +185,13 @@ namespace RuntimeAtlasPacker.Samples
         /// </summary>
         public AtlasEntry AddTexture(Texture2D texture)
         {
-            var entry = _atlas.Add(texture);
+            var (result, entry) = _atlas.Add(texture);
+            if (result != AddResult.Success || entry == null)
+            {
+                Debug.LogWarning($"Failed to add texture to gallery: {result}");
+                return null;
+            }
+            
             _entries.Add(entry);
             
             CreateGalleryItem(entry, _entries.Count - 1);

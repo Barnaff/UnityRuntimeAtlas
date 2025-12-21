@@ -54,22 +54,49 @@ namespace RuntimeAtlasPacker.Editor
         private void OnEnable()
         {
             _searchField = new SearchField();
-            RefreshData();
             EditorApplication.update += OnEditorUpdate;
             EditorApplication.playModeStateChanged += OnPlayModeChanged;
+            RuntimeAtlasProfiler.OnOperationLogged += OnAtlasOperation;
+            
+            // Immediate refresh
+            RefreshData();
+            
+            Debug.Log("[AtlasDebugWindow] Enabled and connected to runtime atlases");
         }
 
         private void OnDisable()
         {
             EditorApplication.update -= OnEditorUpdate;
             EditorApplication.playModeStateChanged -= OnPlayModeChanged;
+            RuntimeAtlasProfiler.OnOperationLogged -= OnAtlasOperation;
         }
 
         private void OnPlayModeChanged(PlayModeStateChange state)
         {
-            if (state == PlayModeStateChange.EnteredPlayMode || state == PlayModeStateChange.EnteredEditMode)
+            if (state == PlayModeStateChange.EnteredPlayMode)
+            {
+                // Clear and refresh when entering play mode
+                _atlasInfoCache.Clear();
+                _rendererInfoCache.Clear();
+                _selectedAtlas = null;
+                _selectedEntry = null;
+                RefreshData();
+                Repaint();
+                Debug.Log("[AtlasDebugWindow] Play mode entered - data refreshed");
+            }
+            else if (state == PlayModeStateChange.EnteredEditMode)
             {
                 RefreshData();
+            }
+        }
+
+        private void OnAtlasOperation(ProfileData data)
+        {
+            // Any atlas operation triggers refresh
+            if (EditorApplication.isPlaying)
+            {
+                RefreshData();
+                Repaint();
             }
         }
 
@@ -91,6 +118,11 @@ namespace RuntimeAtlasPacker.Editor
             
             // Get all atlases via reflection (accessing private static fields)
             var atlases = GetAllAtlases();
+            
+            // Also collect atlases from active renderers (fallback method)
+            RefreshRendererCache();
+            CollectAtlasesFromRenderers(atlases);
+            
             foreach (var kvp in atlases)
             {
                 var info = new AtlasInfo
@@ -105,16 +137,54 @@ namespace RuntimeAtlasPacker.Editor
                 _atlasInfoCache.Add(info);
             }
             
-            // Get all renderers
-            RefreshRendererCache();
-            
             // Calculate global stats
             CalculateGlobalStats();
+        }
+        
+        private void CollectAtlasesFromRenderers(Dictionary<string, RuntimeAtlas> atlases)
+        {
+            // Collect unique atlases from all renderers
+            var foundAtlases = new HashSet<RuntimeAtlas>();
+            
+            foreach (var rendererInfo in _rendererInfoCache)
+            {
+                RuntimeAtlas atlas = null;
+                
+                if (rendererInfo.Component is AtlasSpriteRenderer spriteRenderer)
+                {
+                    atlas = spriteRenderer.Atlas;
+                }
+                else if (rendererInfo.Component is AtlasImage image)
+                {
+                    atlas = image.Atlas;
+                }
+                else if (rendererInfo.Component is AtlasRawImage rawImage)
+                {
+                    atlas = rawImage.Atlas;
+                }
+                
+                if (atlas != null && !foundAtlases.Contains(atlas))
+                {
+                    foundAtlases.Add(atlas);
+                    
+                    // Check if we already have this atlas
+                    bool alreadyExists = atlases.Values.Any(a => a == atlas);
+                    if (!alreadyExists)
+                    {
+                        string atlasName = GetAtlasName(atlas);
+                        atlases[atlasName] = atlas;
+                        Debug.Log($"[AtlasDebugWindow] Found atlas from renderer: {atlasName}");
+                    }
+                }
+            }
         }
 
         private Dictionary<string, RuntimeAtlas> GetAllAtlases()
         {
             var result = new Dictionary<string, RuntimeAtlas>();
+            
+            if (!EditorApplication.isPlaying)
+                return result;
             
             try
             {
@@ -128,7 +198,18 @@ namespace RuntimeAtlasPacker.Editor
                     if (defaultAtlas != null)
                     {
                         result["[Default]"] = defaultAtlas;
+                        // Safely check if texture exists before accessing properties that might throw
+                        bool hasTexture = defaultAtlas.Texture != null;
+                        Debug.Log($"[AtlasDebugWindow] Found default atlas: {(hasTexture ? defaultAtlas.Width.ToString() : "?")}x{(hasTexture ? defaultAtlas.Height.ToString() : "?")}, {defaultAtlas.EntryCount} entries, Texture={(hasTexture ? "Yes" : "No")}");
                     }
+                    else
+                    {
+                        Debug.Log("[AtlasDebugWindow] Default atlas field found but value is null");
+                    }
+                }
+                else
+                {
+                    Debug.LogWarning("[AtlasDebugWindow] Could not find _defaultAtlas field");
                 }
                 
                 // Get named atlases
@@ -138,16 +219,32 @@ namespace RuntimeAtlasPacker.Editor
                     var namedAtlases = namedField.GetValue(null) as Dictionary<string, RuntimeAtlas>;
                     if (namedAtlases != null)
                     {
+                        Debug.Log($"[AtlasDebugWindow] Found {namedAtlases.Count} named atlases");
                         foreach (var kvp in namedAtlases)
                         {
-                            result[kvp.Key] = kvp.Value;
+                            if (kvp.Value != null)
+                            {
+                                result[kvp.Key] = kvp.Value;
+                                bool hasTexture = kvp.Value.Texture != null;
+                                Debug.Log($"[AtlasDebugWindow] Found named atlas '{kvp.Key}': {(hasTexture ? kvp.Value.Width.ToString() : "?")}x{(hasTexture ? kvp.Value.Height.ToString() : "?")}, {kvp.Value.EntryCount} entries");
+                            }
                         }
                     }
+                    else
+                    {
+                        Debug.Log("[AtlasDebugWindow] Named atlases field found but value is null");
+                    }
                 }
+                else
+                {
+                    Debug.LogWarning("[AtlasDebugWindow] Could not find _namedAtlases field");
+                }
+                
+                Debug.Log($"[AtlasDebugWindow] Total atlases found: {result.Count}");
             }
             catch (Exception e)
             {
-                Debug.LogWarning($"AtlasDebugWindow: Failed to get atlases via reflection: {e.Message}");
+                Debug.LogError($"[AtlasDebugWindow] Failed to get atlases via reflection: {e.Message}\n{e.StackTrace}");
             }
             
             return result;
@@ -157,10 +254,17 @@ namespace RuntimeAtlasPacker.Editor
         {
             _rendererInfoCache.Clear();
             
+            if (!EditorApplication.isPlaying)
+                return;
+            
             // Find all AtlasSpriteRenderer components
             var spriteRenderers = FindObjectsByType<AtlasSpriteRenderer>(FindObjectsSortMode.None);
             foreach (var r in spriteRenderers)
             {
+                // Skip if GameObject is destroyed
+                if (r == null || r.gameObject == null)
+                    continue;
+                    
                 _rendererInfoCache.Add(new RendererInfo
                 {
                     GameObject = r.gameObject,
@@ -176,6 +280,10 @@ namespace RuntimeAtlasPacker.Editor
             var images = FindObjectsByType<AtlasImage>(FindObjectsSortMode.None);
             foreach (var img in images)
             {
+                // Skip if GameObject is destroyed
+                if (img == null || img.gameObject == null)
+                    continue;
+                    
                 _rendererInfoCache.Add(new RendererInfo
                 {
                     GameObject = img.gameObject,
@@ -191,6 +299,10 @@ namespace RuntimeAtlasPacker.Editor
             var rawImages = FindObjectsByType<AtlasRawImage>(FindObjectsSortMode.None);
             foreach (var raw in rawImages)
             {
+                // Skip if GameObject is destroyed
+                if (raw == null || raw.gameObject == null)
+                    continue;
+                    
                 _rendererInfoCache.Add(new RendererInfo
                 {
                     GameObject = raw.gameObject,
@@ -318,6 +430,19 @@ namespace RuntimeAtlasPacker.Editor
         {
             EditorGUILayout.BeginHorizontal(EditorStyles.toolbar);
             
+            // Status indicator
+            var statusColor = EditorApplication.isPlaying ? Color.green : Color.gray;
+            var oldBg = GUI.backgroundColor;
+            GUI.backgroundColor = statusColor;
+            GUILayout.Label(
+                EditorApplication.isPlaying 
+                    ? $"● PLAY ({_atlasInfoCache.Count} atlases)" 
+                    : "○ EDIT MODE",
+                EditorStyles.toolbarButton,
+                GUILayout.Width(150)
+            );
+            GUI.backgroundColor = oldBg;
+            
             if (GUILayout.Button("Refresh", EditorStyles.toolbarButton, GUILayout.Width(60)))
             {
                 RefreshData();
@@ -334,6 +459,29 @@ namespace RuntimeAtlasPacker.Editor
 
         private void DrawAtlasesTab()
         {
+            if (!EditorApplication.isPlaying)
+            {
+                EditorGUILayout.Space(50);
+                EditorGUILayout.HelpBox(
+                    "Atlas debugging requires Play Mode.\n\n" +
+                    "Press Play to see runtime atlases.",
+                    MessageType.Info
+                );
+                return;
+            }
+            
+            if (_atlasInfoCache.Count == 0)
+            {
+                EditorGUILayout.Space(50);
+                EditorGUILayout.HelpBox(
+                    "No runtime atlases detected.\n\n" +
+                    "Create atlases using AtlasPacker to see them here.\n" +
+                    "The window auto-refreshes every 0.5 seconds.",
+                    MessageType.Warning
+                );
+                return;
+            }
+            
             EditorGUILayout.BeginHorizontal();
             
             // Left panel - Atlas list
@@ -344,8 +492,8 @@ namespace RuntimeAtlasPacker.Editor
             // Splitter
             GUILayout.Box("", GUILayout.Width(2), GUILayout.ExpandHeight(true));
             
-            // Right panel - Atlas details
-            EditorGUILayout.BeginVertical();
+            // Right panel - Atlas details (scrollable)
+            _scrollPosition = EditorGUILayout.BeginScrollView(_scrollPosition, GUILayout.ExpandWidth(true), GUILayout.ExpandHeight(true));
             if (_selectedAtlas != null)
             {
                 DrawAtlasDetails();
@@ -354,7 +502,7 @@ namespace RuntimeAtlasPacker.Editor
             {
                 EditorGUILayout.HelpBox("Select an atlas from the list to view details.", MessageType.Info);
             }
-            EditorGUILayout.EndVertical();
+            EditorGUILayout.EndScrollView();
             
             EditorGUILayout.EndHorizontal();
         }
@@ -379,31 +527,37 @@ namespace RuntimeAtlasPacker.Editor
                 
                 bool isSelected = _selectedAtlas == info.Atlas;
                 
-                EditorGUILayout.BeginHorizontal(isSelected ? "SelectionRect" : "box");
+                // Make entire cell clickable
+                var cellStyle = new GUIStyle(isSelected ? "SelectionRect" : "box");
+                cellStyle.alignment = TextAnchor.MiddleLeft;
+                cellStyle.padding = new RectOffset(5, 5, 5, 5);
                 
-                // Status indicator
-                var statusColor = info.FillRatio > 0.9f ? Color.red : 
-                                  info.FillRatio > 0.7f ? Color.yellow : Color.green;
-                var oldColor = GUI.color;
-                GUI.color = statusColor;
-                GUILayout.Label("●", GUILayout.Width(15));
-                GUI.color = oldColor;
-                
-                EditorGUILayout.BeginVertical();
-                
-                if (GUILayout.Button(info.Name, EditorStyles.label))
+                if (GUILayout.Button("", cellStyle, GUILayout.Height(40), GUILayout.ExpandWidth(true)))
                 {
                     _selectedAtlas = info.Atlas;
                     _selectedAtlasName = info.Name;
                     _selectedEntry = null;
                 }
                 
-                EditorGUILayout.LabelField($"{info.Size.x}x{info.Size.y} | {info.EntryCount} entries | {info.FillRatio:P0}", 
-                    EditorStyles.miniLabel);
+                // Draw content on top of button
+                var lastRect = GUILayoutUtility.GetLastRect();
                 
-                EditorGUILayout.EndVertical();
+                // Status indicator
+                var statusColor = info.FillRatio > 0.9f ? Color.red : 
+                                  info.FillRatio > 0.7f ? Color.yellow : Color.green;
+                var indicatorRect = new Rect(lastRect.x + 5, lastRect.y + lastRect.height / 2 - 5, 10, 10);
+                var oldColor = GUI.color;
+                GUI.color = statusColor;
+                GUI.Label(indicatorRect, "●");
+                GUI.color = oldColor;
                 
-                EditorGUILayout.EndHorizontal();
+                // Name
+                var nameRect = new Rect(lastRect.x + 25, lastRect.y + 5, lastRect.width - 30, 16);
+                GUI.Label(nameRect, info.Name, EditorStyles.boldLabel);
+                
+                // Details
+                var detailsRect = new Rect(lastRect.x + 25, lastRect.y + 22, lastRect.width - 30, 14);
+                GUI.Label(detailsRect, $"{info.Size.x}x{info.Size.y} | {info.EntryCount} entries | {info.FillRatio:P0}", EditorStyles.miniLabel);
             }
             
             EditorGUILayout.EndScrollView();
@@ -484,19 +638,25 @@ namespace RuntimeAtlasPacker.Editor
         {
             EditorGUILayout.BeginHorizontal();
             EditorGUILayout.LabelField("Zoom:", GUILayout.Width(40));
-            _previewZoom = EditorGUILayout.Slider(_previewZoom, 0.1f, 2f, GUILayout.Width(150));
+            _previewZoom = EditorGUILayout.Slider(_previewZoom, 0.1f, 2f);
             if (GUILayout.Button("1:1", GUILayout.Width(35)))
             {
                 _previewZoom = 1f;
             }
             EditorGUILayout.EndHorizontal();
             
-            float previewSize = Mathf.Min(300, position.width - 300) * _previewZoom;
+            // Calculate available width (window width - left panel - splitter - margins)
+            float availableWidth = position.width - 250 - 20 - 40; // 250=list, 20=splitter+margins, 40=scrollbar buffer
+            float previewSize = availableWidth * _previewZoom;
+            
+            // Calculate aspect ratio
+            float aspect = (float)_selectedAtlas.Height / _selectedAtlas.Width;
+            float previewHeight = previewSize * aspect;
             
             _previewScroll = EditorGUILayout.BeginScrollView(_previewScroll, 
-                GUILayout.Height(Mathf.Min(previewSize + 20, 320)));
+                GUILayout.MaxHeight(Mathf.Min(previewHeight + 20, 500)));
             
-            var rect = GUILayoutUtility.GetRect(previewSize, previewSize);
+            var rect = GUILayoutUtility.GetRect(previewSize, previewHeight, GUILayout.ExpandWidth(false));
             
             if (_selectedAtlas.Texture != null)
             {
@@ -593,8 +753,15 @@ namespace RuntimeAtlasPacker.Editor
                                         importer.SaveAndReimport();
                                     }
                                     
-                                    var entry = _selectedAtlas.Add(texture);
-                                    Debug.Log($"Added texture to atlas: {texture.name} (Entry ID: {entry.Id})");
+                                    var (result, entry) = _selectedAtlas.Add(texture);
+                                    if (result == AddResult.Success && entry != null)
+                                    {
+                                        Debug.Log($"Added texture to atlas: {texture.name} (Entry ID: {entry.Id})");
+                                    }
+                                    else
+                                    {
+                                        Debug.LogWarning($"Failed to add texture '{texture.name}' to atlas: {result}");
+                                    }
                                     
                                     if (!wasReadable && importer != null)
                                     {
@@ -655,6 +822,10 @@ namespace RuntimeAtlasPacker.Editor
             
             foreach (var info in _rendererInfoCache)
             {
+                // Skip if GameObject is destroyed
+                if (info.GameObject == null)
+                    continue;
+                
                 // Apply filter
                 if (_searchString == "active" && !info.HasEntry) continue;
                 if (_searchString == "inactive" && info.HasEntry) continue;
@@ -662,7 +833,19 @@ namespace RuntimeAtlasPacker.Editor
                 EditorGUILayout.BeginHorizontal("box");
                 
                 // GameObject name (clickable)
-                if (GUILayout.Button(info.GameObject.name, EditorStyles.label, GUILayout.Width(150)))
+                string objectName = "< Destroyed >";
+                try
+                {
+                    objectName = info.GameObject.name;
+                }
+                catch
+                {
+                    // GameObject was destroyed
+                    EditorGUILayout.EndHorizontal();
+                    continue;
+                }
+                
+                if (GUILayout.Button(objectName, EditorStyles.label, GUILayout.Width(150)))
                 {
                     Selection.activeGameObject = info.GameObject;
                     EditorGUIUtility.PingObject(info.GameObject);

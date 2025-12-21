@@ -165,9 +165,17 @@ namespace RuntimeAtlasPacker.Samples
                 return null;
             }
 
-            var entry = atlas.Add(texture);
-            _entries[category].Add(entry);
-            return entry;
+            var (result, entry) = atlas.Add(texture);
+            if (result == AddResult.Success && entry != null)
+            {
+                _entries[category].Add(entry);
+                return entry;
+            }
+            else
+            {
+                Debug.LogWarning($"Failed to add texture to atlas '{category}': {result}");
+                return null;
+            }
         }
 
         /// <summary>

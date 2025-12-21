@@ -52,9 +52,10 @@ namespace RuntimeAtlasPacker.Editor
             
             if (hasEntry)
             {
+                EditorGUILayout.LabelField("Sprite Name:", renderer.Entry.Name);
                 EditorGUILayout.LabelField("Entry ID:", renderer.Entry.Id.ToString());
                 EditorGUILayout.LabelField("Size:", $"{renderer.Entry.Width}x{renderer.Entry.Height}");
-                EditorGUILayout.LabelField("UV:", renderer.Entry.UV.ToString());
+                EditorGUILayout.LabelField("UV:", renderer.Entry.UV.ToString("F3"));
                 
                 if (renderer.Atlas != null)
                 {
@@ -119,27 +120,78 @@ namespace RuntimeAtlasPacker.Editor
             _showDebugInfo = EditorGUILayout.Foldout(_showDebugInfo, "Debug Info", true);
             if (_showDebugInfo && hasEntry && renderer.Entry.Texture != null)
             {
+                EditorGUILayout.Space(5);
+                EditorGUILayout.LabelField("Atlas Preview", EditorStyles.boldLabel);
+                
                 // Show atlas texture preview with entry highlighted
                 var atlasTexture = renderer.Entry.Texture;
-                float maxSize = EditorGUIUtility.currentViewWidth - 40;
-                float aspect = (float)atlasTexture.height / atlasTexture.width;
-                float width = Mathf.Min(maxSize, 300);
-                float height = width * aspect;
+                var entry = renderer.Entry;
                 
-                var rect = GUILayoutUtility.GetRect(width, height);
-                EditorGUI.DrawPreviewTexture(rect, atlasTexture, null, ScaleMode.ScaleToFit);
+                // Calculate preview size while maintaining aspect ratio
+                float maxWidth = EditorGUIUtility.currentViewWidth - 40;
+                float atlasAspect = (float)atlasTexture.height / atlasTexture.width;
+                float previewWidth = Mathf.Min(maxWidth, 400);
+                float previewHeight = previewWidth * atlasAspect;
                 
-                // Draw entry rect
-                var uvRect = renderer.Entry.UV;
+                // Get rect for preview
+                var previewRect = GUILayoutUtility.GetRect(previewWidth, previewHeight);
+                
+                // Draw atlas texture (ScaleToFit maintains aspect ratio and may add letterboxing)
+                EditorGUI.DrawPreviewTexture(previewRect, atlasTexture, null, ScaleMode.ScaleToFit);
+                
+                // Calculate actual texture display area (accounting for letterboxing)
+                float displayAspect = previewRect.width / previewRect.height;
+                Rect textureRect;
+                
+                if (displayAspect > atlasAspect)
+                {
+                    // Letterboxed on sides
+                    float displayWidth = previewRect.height * atlasAspect;
+                    float offsetX = (previewRect.width - displayWidth) * 0.5f;
+                    textureRect = new Rect(
+                        previewRect.x + offsetX,
+                        previewRect.y,
+                        displayWidth,
+                        previewRect.height
+                    );
+                }
+                else
+                {
+                    // Letterboxed on top/bottom
+                    float displayHeight = previewRect.width / atlasAspect;
+                    float offsetY = (previewRect.height - displayHeight) * 0.5f;
+                    textureRect = new Rect(
+                        previewRect.x,
+                        previewRect.y + offsetY,
+                        previewRect.width,
+                        displayHeight
+                    );
+                }
+                
+                // Get UV coordinates from entry
+                var uvRect = entry.UV;
+                
+                // Convert UV coordinates to screen coordinates
+                // UV origin is bottom-left, but screen origin is top-left
+                // So we need to flip Y: screenY = (1 - uvY - uvHeight)
                 var highlightRect = new Rect(
-                    rect.x + uvRect.x * rect.width,
-                    rect.y + (1 - uvRect.y - uvRect.height) * rect.height,
-                    uvRect.width * rect.width,
-                    uvRect.height * rect.height
+                    textureRect.x + uvRect.x * textureRect.width,
+                    textureRect.y + (1 - uvRect.y - uvRect.height) * textureRect.height,
+                    uvRect.width * textureRect.width,
+                    uvRect.height * textureRect.height
                 );
                 
-                Handles.DrawSolidRectangleWithOutline(highlightRect, 
-                    new Color(1, 1, 0, 0.3f), Color.yellow);
+                // Draw yellow highlight with outline
+                Handles.DrawSolidRectangleWithOutline(
+                    highlightRect,
+                    new Color(1, 1, 0, 0.25f),  // Yellow semi-transparent fill
+                    Color.yellow                  // Yellow outline
+                );
+                
+                // Draw debug info
+                EditorGUILayout.Space(3);
+                EditorGUILayout.LabelField($"Sprite Position: ({entry.Rect.x}, {entry.Rect.y})", EditorStyles.miniLabel);
+                EditorGUILayout.LabelField($"Sprite Size: {entry.Rect.width}x{entry.Rect.height}", EditorStyles.miniLabel);
             }
             
             serializedObject.ApplyModifiedProperties();
@@ -271,24 +323,72 @@ namespace RuntimeAtlasPacker.Editor
             _showDebugInfo = EditorGUILayout.Foldout(_showDebugInfo, "Atlas Preview", true);
             if (_showDebugInfo && hasEntry && image.Entry.Texture != null)
             {
+                EditorGUILayout.Space(5);
+                
                 var atlasTexture = image.Entry.Texture;
-                float maxSize = EditorGUIUtility.currentViewWidth - 40;
-                float width = Mathf.Min(maxSize, 200);
-                float height = width;
+                var entry = image.Entry;
                 
-                var rect = GUILayoutUtility.GetRect(width, height);
-                EditorGUI.DrawPreviewTexture(rect, atlasTexture, null, ScaleMode.ScaleToFit);
+                // Calculate preview size while maintaining aspect ratio
+                float maxWidth = EditorGUIUtility.currentViewWidth - 40;
+                float atlasAspect = (float)atlasTexture.height / atlasTexture.width;
+                float previewWidth = Mathf.Min(maxWidth, 400);
+                float previewHeight = previewWidth * atlasAspect;
                 
-                var uvRect = image.Entry.UV;
+                // Get rect for preview
+                var previewRect = GUILayoutUtility.GetRect(previewWidth, previewHeight);
+                
+                // Draw atlas texture
+                EditorGUI.DrawPreviewTexture(previewRect, atlasTexture, null, ScaleMode.ScaleToFit);
+                
+                // Calculate actual texture display area (accounting for letterboxing)
+                float displayAspect = previewRect.width / previewRect.height;
+                Rect textureRect;
+                
+                if (displayAspect > atlasAspect)
+                {
+                    // Letterboxed on sides
+                    float displayWidth = previewRect.height * atlasAspect;
+                    float offsetX = (previewRect.width - displayWidth) * 0.5f;
+                    textureRect = new Rect(
+                        previewRect.x + offsetX,
+                        previewRect.y,
+                        displayWidth,
+                        previewRect.height
+                    );
+                }
+                else
+                {
+                    // Letterboxed on top/bottom
+                    float displayHeight = previewRect.width / atlasAspect;
+                    float offsetY = (previewRect.height - displayHeight) * 0.5f;
+                    textureRect = new Rect(
+                        previewRect.x,
+                        previewRect.y + offsetY,
+                        previewRect.width,
+                        displayHeight
+                    );
+                }
+                
+                // Get UV coordinates and convert to screen space
+                var uvRect = entry.UV;
                 var highlightRect = new Rect(
-                    rect.x + uvRect.x * rect.width,
-                    rect.y + (1 - uvRect.y - uvRect.height) * rect.height,
-                    uvRect.width * rect.width,
-                    uvRect.height * rect.height
+                    textureRect.x + uvRect.x * textureRect.width,
+                    textureRect.y + (1 - uvRect.y - uvRect.height) * textureRect.height,
+                    uvRect.width * textureRect.width,
+                    uvRect.height * textureRect.height
                 );
                 
-                Handles.DrawSolidRectangleWithOutline(highlightRect, 
-                    new Color(0, 1, 0, 0.3f), Color.green);
+                // Draw green highlight
+                Handles.DrawSolidRectangleWithOutline(
+                    highlightRect,
+                    new Color(0, 1, 0, 0.25f),  // Green semi-transparent fill
+                    Color.green                  // Green outline
+                );
+                
+                // Debug info
+                EditorGUILayout.Space(3);
+                EditorGUILayout.LabelField($"Sprite Position: ({entry.Rect.x}, {entry.Rect.y})", EditorStyles.miniLabel);
+                EditorGUILayout.LabelField($"Sprite Size: {entry.Rect.width}x{entry.Rect.height}", EditorStyles.miniLabel);
             }
             
             serializedObject.ApplyModifiedProperties();

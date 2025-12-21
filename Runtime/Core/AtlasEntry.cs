@@ -11,7 +11,9 @@ namespace RuntimeAtlasPacker
     {
         private RuntimeAtlas _atlas;
         private int _id;
+        private int _textureIndex;
         private bool _isDisposed;
+        private string _name;
 
         // Cached values - updated by atlas
         internal RectInt PixelRect;
@@ -23,6 +25,9 @@ namespace RuntimeAtlasPacker
 
         /// <summary>The atlas this entry belongs to.</summary>
         public RuntimeAtlas Atlas => _atlas;
+
+        /// <summary>The texture page index this entry is on (0 = first page, 1 = second page, etc.).</summary>
+        public int TextureIndex => _textureIndex;
 
         /// <summary>Whether this entry is valid and hasn't been disposed.</summary>
         public bool IsValid => !_isDisposed && _atlas != null && _atlas.ContainsEntry(_id);
@@ -39,19 +44,24 @@ namespace RuntimeAtlasPacker
         /// <summary>Pixel coordinates in the atlas.</summary>
         public RectInt Rect => PixelRect;
 
-        /// <summary>The atlas texture.</summary>
-        public Texture2D Texture => _atlas?.Texture;
+        /// <summary>The atlas texture for this specific entry (uses TextureIndex).</summary>
+        public Texture2D Texture => _atlas?.GetTexture(_textureIndex);
+
+        /// <summary>Name of the original texture (if available).</summary>
+        public string Name => _name;
 
         /// <summary>Event fired when this entry's UV coordinates change.</summary>
         public event Action<AtlasEntry> OnUVChanged;
 
-        internal AtlasEntry(RuntimeAtlas atlas, int id, RectInt pixelRect, Rect uvRect)
+        internal AtlasEntry(RuntimeAtlas atlas, int id, int textureIndex, RectInt pixelRect, Rect uvRect, string name = null)
         {
             _atlas = atlas;
             _id = id;
+            _textureIndex = textureIndex;
             PixelRect = pixelRect;
             UVRect = uvRect;
             Version = 0;
+            _name = name ?? $"Entry_{id}";
         }
 
         internal void UpdateRect(RectInt newPixelRect, Rect newUVRect)
@@ -60,6 +70,11 @@ namespace RuntimeAtlasPacker
             UVRect = newUVRect;
             Version++;
             OnUVChanged?.Invoke(this);
+        }
+
+        internal void UpdateTextureIndex(int newTextureIndex)
+        {
+            _textureIndex = newTextureIndex;
         }
 
         /// <summary>

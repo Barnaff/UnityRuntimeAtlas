@@ -16,15 +16,30 @@ namespace RuntimeAtlasPacker
         /// <summary>
         /// Pack multiple textures using job system.
         /// More efficient than adding one at a time for large batches.
+        /// Falls back to sequential processing if jobs fail.
         /// </summary>
         public static AtlasEntry[] PackBatch(RuntimeAtlas atlas, Texture2D[] textures)
         {
             if (atlas == null) throw new ArgumentNullException(nameof(atlas));
             if (textures == null || textures.Length == 0) return Array.Empty<AtlasEntry>();
 
+            // Try job-based packing, fallback to sequential if it fails
+            try
+            {
+                return PackBatchWithJobs(atlas, textures);
+            }
+            catch (Exception ex)
+            {
+                Debug.LogWarning($"AtlasBatchProcessor: Job-based packing failed ({ex.Message}), falling back to sequential processing");
+                return atlas.AddBatch(textures);
+            }
+        }
+
+        private static AtlasEntry[] PackBatchWithJobs(RuntimeAtlas atlas, Texture2D[] textures)
+        {
             int count = textures.Length;
             var entries = new AtlasEntry[count];
-            
+
             // Prepare sizes
             using var sizes = new NativeArray<int2>(count, Allocator.TempJob);
             using var indices = new NativeArray<int>(count, Allocator.TempJob);
@@ -32,7 +47,7 @@ namespace RuntimeAtlasPacker
             using var freeRects = new NativeList<int4>(64, Allocator.TempJob);
 
             int padding = atlas.Settings.Padding;
-            
+
             for (int i = 0; i < count; i++)
             {
                 var nativeArray = sizes;
@@ -69,7 +84,7 @@ namespace RuntimeAtlasPacker
                 AtlasHeight = atlas.Height
             };
             packJob.Schedule().Complete();
-            
+
             sortedSizes.Dispose();
 
             // Process results
@@ -117,7 +132,8 @@ namespace RuntimeAtlasPacker
                 );
 
                 // Create entry through atlas
-                entries[i] = atlas.Add(textures[i]);
+                var (result, entry) = atlas.Add(textures[i]);
+                entries[i] = entry; // May be null if failed
             }
 
             atlas.Apply();
@@ -146,7 +162,20 @@ namespace RuntimeAtlasPacker
             if (totalArea > atlasArea * 0.95f)
                 return false;
 
-            // More detailed check using job
+            // Try detailed check using jobs, fallback to simple area check if jobs fail
+            try
+            {
+                return WillFitWithJobs(textures, atlasWidth, atlasHeight, padding);
+            }
+            catch
+            {
+                // Fallback: use conservative area-based estimate
+                return totalArea <= atlasArea * 0.7f; // Assume 70% packing efficiency
+            }
+        }
+
+        private static bool WillFitWithJobs(Texture2D[] textures, int atlasWidth, int atlasHeight, int padding)
+        {
             using var sizes = new NativeArray<int2>(textures.Length, Allocator.TempJob);
             using var indices = new NativeArray<int>(textures.Length, Allocator.TempJob);
             using var results = new NativeArray<int4>(textures.Length, Allocator.TempJob);
@@ -185,7 +214,7 @@ namespace RuntimeAtlasPacker
                 AtlasHeight = atlasHeight
             };
             packJob.Schedule().Complete();
-            
+
             sortedSizes.Dispose();
 
             for (int i = 0; i < textures.Length; i++)

@@ -1,6 +1,6 @@
 {
   "name": "com.gamedev.runtimeatlaspacker",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "displayName": "Runtime Atlas Packer",
   "description": "High-performance runtime texture atlas packing with dynamic updates and zero-allocation design",
   "unity": "2021.3",
