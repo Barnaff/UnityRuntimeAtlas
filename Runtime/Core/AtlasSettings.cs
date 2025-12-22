@@ -34,6 +34,9 @@ namespace RuntimeAtlasPacker
         
         /// <summary>Packing algorithm to use.</summary>
         public PackingAlgorithm Algorithm;
+        
+        /// <summary>Maximum number of texture pages allowed. -1 = unlimited, 0 = single page only, >0 = specific limit.</summary>
+        public int MaxPageCount;
 
         public static AtlasSettings Default => new AtlasSettings
         {
@@ -45,7 +48,8 @@ namespace RuntimeAtlasPacker
             GenerateMipMaps = false,
             Readable = false,
             GrowthStrategy = GrowthStrategy.Double,
-            Algorithm = PackingAlgorithm.MaxRects
+            Algorithm = PackingAlgorithm.MaxRects,
+            MaxPageCount = -1 // Unlimited pages by default
         };
 
         public static AtlasSettings Mobile => new AtlasSettings

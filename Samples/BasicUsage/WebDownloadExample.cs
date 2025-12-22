@@ -7,6 +7,7 @@ using System.Threading.Tasks;
 using UnityEngine;
 using UnityEngine.Networking;
 using RuntimeAtlasPacker;
+using UnityEditor;
 
 namespace RuntimeAtlasPacker.Samples
 {
@@ -52,12 +53,28 @@ namespace RuntimeAtlasPacker.Samples
         
         [Header("Atlas Settings")]
         [Tooltip("Maximum atlas texture size")]
-        public int maxAtlasSize = 1024;
+        public int maxAtlasSize = 2048;
+        
+        [Tooltip("Initial atlas texture size")]
+        public int initialAtlasSize = 512;
+        
+        [Tooltip("Maximum number of atlas pages (-1 = unlimited, 0 = single page only, >0 = specific limit)")]
+        public int maxPageCount = -1;
+        
+        [Tooltip("Padding between textures in pixels")]
+        public int padding = 2;
+        
+        [Tooltip("Use a named atlas instead of default")]
+        public bool useNamedAtlas = true;
+        
+        [Tooltip("Name of the atlas to use (only if useNamedAtlas is true)")]
+        public string atlasName = "WebDownloadAtlas";
 
         private List<ImageData> _imageDataList = new();
         private CancellationTokenSource _cts;
         private int _imageCounter = 0;
         private int _downloadsSinceLastBatch = 0;
+        private string _activeAtlasName; // Track which atlas we're using
 
         private class ImageData
         {
@@ -69,14 +86,28 @@ namespace RuntimeAtlasPacker.Samples
         {
             _cts = new CancellationTokenSource();
             
-            // Configure default atlas with custom max size
+            // Configure atlas settings
             var settings = AtlasSettings.Default;
             settings.MaxSize = maxAtlasSize;
-            settings.InitialSize = Mathf.Min(512, maxAtlasSize);
-            
-            // Pre-initialize the default atlas with our settings
-            var defaultAtlas = AtlasPacker.Default;
-            Debug.Log($"[WebDownload] Configured atlas with MaxSize: {maxAtlasSize}");
+            settings.InitialSize = Mathf.Clamp(initialAtlasSize, 256, maxAtlasSize);
+            settings.MaxPageCount = maxPageCount;
+            settings.Padding = padding;
+            settings.Algorithm = PackingAlgorithm.Skyline;
+            // Create or get the atlas with our custom settings
+            if (useNamedAtlas && !string.IsNullOrEmpty(atlasName))
+            {
+                _activeAtlasName = atlasName;
+                var atlas = AtlasPacker.GetOrCreate(atlasName, settings);
+                Debug.Log($"[WebDownload] Created/using named atlas '{atlasName}' with MaxSize: {maxAtlasSize}, MaxPages: {(maxPageCount == -1 ? "unlimited" : maxPageCount.ToString())}, Padding: {padding}");
+            }
+            else
+            {
+                _activeAtlasName = null; // Use default
+                // Note: Can't change default atlas settings after it's created
+                // So we just access it to ensure it exists
+                var defaultAtlas = AtlasPacker.Default;
+                Debug.Log($"[WebDownload] Using default atlas (settings may not be customizable if already created)");
+            }
 
             // Start with initial images
             _ = LoadInitialImages();
@@ -102,7 +133,11 @@ namespace RuntimeAtlasPacker.Samples
                 await AddNewImage();
             }
 
-            int overflowCount = AtlasPacker.GetDefaultOverflowCount();
+            // Get overflow count based on which atlas we're using
+            int overflowCount = !string.IsNullOrEmpty(_activeAtlasName) 
+                ? AtlasPacker.GetOverflowCount(_activeAtlasName)
+                : AtlasPacker.GetDefaultOverflowCount();
+                
             Debug.Log($"[WebDownload] Initialized with {overflowCount + 1} atlas(es), Total images: {_imageDataList.Count}");
         }
 
@@ -151,14 +186,22 @@ namespace RuntimeAtlasPacker.Samples
             
             if (texture == null) return;
 
-            // Use AtlasPacker - it will automatically create overflow atlases if needed
-            var entry = AtlasPacker.Pack(texture);
+            // Use configured atlas (named or default)
+            AtlasEntry entry;
+            if (!string.IsNullOrEmpty(_activeAtlasName))
+            {
+                entry = AtlasPacker.Pack(_activeAtlasName, texture);
+            }
+            else
+            {
+                entry = AtlasPacker.Pack(texture);
+            }
             
             Destroy(texture);
 
             if (entry == null)
             {
-                Debug.LogWarning($"[WebDownload] Failed to pack texture - this shouldn't happen with auto-overflow!");
+                Debug.LogWarning($"[WebDownload] Failed to pack texture - atlas may be at page limit!");
                 return;
             }
 
@@ -170,7 +213,11 @@ namespace RuntimeAtlasPacker.Samples
                 GameObject = go
             });
 
-            int overflowCount = AtlasPacker.GetDefaultOverflowCount();
+            // Get overflow count based on which atlas we're using
+            int overflowCount = !string.IsNullOrEmpty(_activeAtlasName) 
+                ? AtlasPacker.GetOverflowCount(_activeAtlasName)
+                : AtlasPacker.GetDefaultOverflowCount();
+                
             Debug.Log($"[WebDownload] Added image {_imageCounter} - " +
                      $"Total atlases: {overflowCount + 1}, " +
                      $"Total images: {_imageDataList.Count}");
@@ -204,8 +251,19 @@ namespace RuntimeAtlasPacker.Samples
             
             Debug.Log($"[WebDownload] Successfully downloaded {validTextures.Length}/{count} textures. Adding as batch...");
             
-            // Use AtlasPacker.PackBatch - it will automatically handle overflow
-            var entries = AtlasPacker.PackBatch(validTextures);
+            // Use AtlasPacker.PackBatch with the configured atlas
+            AtlasEntry[] entries;
+            if (!string.IsNullOrEmpty(_activeAtlasName))
+            {
+                // For named atlas, need to get the atlas and use AddBatch directly
+                var atlas = AtlasPacker.GetOrCreate(_activeAtlasName);
+                entries = atlas.AddBatch(validTextures);
+            }
+            else
+            {
+                // Use default atlas
+                entries = AtlasPacker.PackBatch(validTextures);
+            }
             
             // Clean up textures
             foreach (var tex in validTextures)
@@ -215,7 +273,7 @@ namespace RuntimeAtlasPacker.Samples
             
             if (entries == null || entries.Length == 0)
             {
-                Debug.LogWarning("[WebDownload] Batch pack failed - this shouldn't happen with auto-overflow!");
+                Debug.LogWarning("[WebDownload] Batch pack failed - atlas may be at page limit!");
                 return;
             }
             
@@ -230,7 +288,11 @@ namespace RuntimeAtlasPacker.Samples
                 });
             }
             
-            int overflowCount = AtlasPacker.GetDefaultOverflowCount();
+            // Get overflow count based on which atlas we're using
+            int overflowCount = !string.IsNullOrEmpty(_activeAtlasName) 
+                ? AtlasPacker.GetOverflowCount(_activeAtlasName)
+                : AtlasPacker.GetDefaultOverflowCount();
+                
             Debug.Log($"[WebDownload] Batch complete! " +
                      $"Total atlases: {overflowCount + 1}, " +
                      $"Total images: {_imageDataList.Count}");
@@ -256,7 +318,11 @@ namespace RuntimeAtlasPacker.Samples
 
             _imageDataList.RemoveAt(index);
 
-            int overflowCount = AtlasPacker.GetDefaultOverflowCount();
+            // Get overflow count based on which atlas we're using
+            int overflowCount = !string.IsNullOrEmpty(_activeAtlasName) 
+                ? AtlasPacker.GetOverflowCount(_activeAtlasName)
+                : AtlasPacker.GetDefaultOverflowCount();
+                
             Debug.Log($"[WebDownload] Removed image - " +
                      $"Total atlases: {overflowCount + 1}, " +
                      $"Total images: {_imageDataList.Count}");
@@ -288,7 +354,8 @@ namespace RuntimeAtlasPacker.Samples
             // Generate various sizes around 256±50px
             int variation = UnityEngine.Random.Range(-50, 51);
             int size = Mathf.Clamp(imageSize + variation, 128, 512);
-            return $"https://picsum.photos/{size}/{size}?random={index + UnityEngine.Random.Range(1000, 9999)}";
+            var guid = Guid.NewGuid().ToString();
+            return $"https://api.images.cat/{size}/{size}?random={guid}";
         }
 
         private async Task<Texture2D> DownloadImageAsync(string url, CancellationToken ct)

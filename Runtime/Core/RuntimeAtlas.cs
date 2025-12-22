@@ -195,23 +195,32 @@ namespace RuntimeAtlasPacker
         
         /// <summary>
         /// Validate that no entries overlap with each other.
+        /// Only runs in editor and development builds for performance.
         /// </summary>
         private void ValidateNoOverlaps()
         {
 #if UNITY_EDITOR || DEVELOPMENT_BUILD
+            // Skip validation for large atlases in non-editor builds for performance
+            if (_entries.Count > 100 && !Application.isEditor)
+                return;
+                
             var entries = _entries.Values.ToArray();
             for (int i = 0; i < entries.Length; i++)
             {
                 for (int j = i + 1; j < entries.Length; j++)
                 {
-                    var rect1 = entries[i].PixelRect;
-                    var rect2 = entries[j].PixelRect;
+                    // Only check entries on the same page
+                    if (entries[i].TextureIndex != entries[j].TextureIndex)
+                        continue;
+                        
+                    var rect1 = entries[i].Rect;
+                    var rect2 = entries[j].Rect;
                     
                     // Check if rects overlap
                     if (!(rect1.xMax <= rect2.xMin || rect2.xMax <= rect1.xMin ||
                           rect1.yMax <= rect2.yMin || rect2.yMax <= rect1.yMin))
                     {
-                        Debug.LogError($"[RuntimeAtlas] OVERLAP DETECTED! '{entries[i].Name}' [{rect1}] overlaps with '{entries[j].Name}' [{rect2}]");
+                        Debug.LogError($"[RuntimeAtlas] OVERLAP DETECTED! '{entries[i].Name}' [{rect1}] overlaps with '{entries[j].Name}' [{rect2}] on page {entries[i].TextureIndex}");
                     }
                 }
             }
@@ -326,7 +335,7 @@ namespace RuntimeAtlasPacker
             // Check if texture is too large to ever fit
             if (texture.width > _settings.MaxSize || texture.height > _settings.MaxSize)
             {
-                Debug.LogWarning($"[RuntimeAtlas.AddInternal] Texture '{texture.name}' ({texture.width}x{texture.height}) exceeds MaxSize ({_settings.MaxSize})");
+                Debug.LogError($"[RuntimeAtlas.AddInternal] Texture '{texture.name}' ({texture.width}x{texture.height}) exceeds MaxSize ({_settings.MaxSize})");
                 return (AddResult.TooLarge, null);
             }
 
@@ -334,25 +343,54 @@ namespace RuntimeAtlasPacker
             Debug.Log($"[RuntimeAtlas.AddInternal] Current page: {_currentPageIndex}, Pages: {_textures.Count}");
             Debug.Log($"[RuntimeAtlas.AddInternal] Current entries: {_entries.Count}");
 
-            // Try to pack in current page
+            // Try to pack in current page first
             int pageIndex = _currentPageIndex;
             bool packed = TryPackInPage(pageIndex, width, height, out var packedRect);
             
             if (!packed)
             {
-                Debug.Log($"[RuntimeAtlas.AddInternal] Current page {pageIndex} is full. Creating new page...");
+                Debug.Log($"[RuntimeAtlas.AddInternal] Current page {pageIndex} is full.");
                 
-                // Current page is full, create new page
-                CreateNewPage();
-                pageIndex = _currentPageIndex;
+                // Try all existing pages before creating a new one
+                for (int i = 0; i < _textures.Count; i++)
+                {
+                    if (i == pageIndex) continue; // Already tried current page
+                    
+                    if (TryPackInPage(i, width, height, out packedRect))
+                    {
+                        packed = true;
+                        pageIndex = i;
+                        Debug.Log($"[RuntimeAtlas.AddInternal] Found space in existing page {i}");
+                        break;
+                    }
+                }
                 
-                // Try packing in new page
-                packed = TryPackInPage(pageIndex, width, height, out packedRect);
-                
+                // If still not packed, try creating a new page
                 if (!packed)
                 {
-                    Debug.LogWarning($"[RuntimeAtlas.AddInternal] Failed to pack even in new page!");
-                    return (AddResult.Full, null);
+                    // Check if we can create more pages
+                    bool canCreatePage = _settings.MaxPageCount == -1 || _textures.Count < _settings.MaxPageCount;
+                    
+                    if (!canCreatePage)
+                    {
+                        Debug.LogError($"[RuntimeAtlas.AddInternal] Cannot add texture '{texture.name}': Atlas has reached maximum page limit ({_settings.MaxPageCount} pages) and all pages are full!");
+                        return (AddResult.Full, null);
+                    }
+                    
+                    Debug.Log($"[RuntimeAtlas.AddInternal] All existing pages full. Creating new page (current: {_textures.Count}, max: {(_settings.MaxPageCount == -1 ? "unlimited" : _settings.MaxPageCount.ToString())})...");
+                    
+                    // Create new page
+                    CreateNewPage();
+                    pageIndex = _currentPageIndex;
+                    
+                    // Try packing in new page
+                    packed = TryPackInPage(pageIndex, width, height, out packedRect);
+                    
+                    if (!packed)
+                    {
+                        Debug.LogError($"[RuntimeAtlas.AddInternal] Failed to pack '{texture.name}' even in new page! This should not happen.");
+                        return (AddResult.Full, null);
+                    }
                 }
             }
 
@@ -422,7 +460,7 @@ namespace RuntimeAtlasPacker
             // Try growing the page (up to MaxSize)
             if (_settings.GrowthStrategy == GrowthStrategy.None)
             {
-                return false;
+                return false; // Can't grow, page is full
             }
 
             int currentSize = texture.width;
@@ -435,7 +473,7 @@ namespace RuntimeAtlasPacker
                 newSize = Mathf.Min(newSize, _settings.MaxSize);
                 
                 if (newSize == currentSize)
-                    break;
+                    break; // Already at max size
 
                 Debug.Log($"[RuntimeAtlas] Attempting to grow page {pageIndex} from {currentSize} to {newSize}");
                 
@@ -450,7 +488,7 @@ namespace RuntimeAtlasPacker
                 currentSize = newSize;
             }
 
-            return false;
+            return false; // Page is full and can't grow more
         }
 
         private bool TryGrowPage(int pageIndex, int newSize)
@@ -496,12 +534,12 @@ namespace RuntimeAtlasPacker
                 if (entry.TextureIndex == pageIndex)
                 {
                     var uvRect = new Rect(
-                        (float)entry.PixelRect.x / newSize,
-                        (float)entry.PixelRect.y / newSize,
-                        (float)entry.PixelRect.width / newSize,
-                        (float)entry.PixelRect.height / newSize
+                        (float)entry.Rect.x / newSize,
+                        (float)entry.Rect.y / newSize,
+                        (float)entry.Rect.width / newSize,
+                        (float)entry.Rect.height / newSize
                     );
-                    entry.UpdateRect(entry.PixelRect, uvRect);
+                    entry.UpdateRect(entry.Rect, uvRect);
                     OnEntryUpdated?.Invoke(this, entry);
                 }
             }
@@ -537,10 +575,10 @@ namespace RuntimeAtlasPacker
             var profiler = RuntimeAtlasProfiler.Begin("Remove", GetAtlasName(), $"Entry ID: {id}");
 
             var fullRect = new RectInt(
-                entry.PixelRect.x - _settings.Padding,
-                entry.PixelRect.y - _settings.Padding,
-                entry.PixelRect.width + _settings.Padding * 2,
-                entry.PixelRect.height + _settings.Padding * 2
+                entry.Rect.x - _settings.Padding,
+                entry.Rect.y - _settings.Padding,
+                entry.Rect.width + _settings.Padding * 2,
+                entry.Rect.height + _settings.Padding * 2
             );
 
             // Free the space in the appropriate packer
@@ -553,7 +591,7 @@ namespace RuntimeAtlasPacker
             // Clear the texture region (optional, helps debugging)
             if (_settings.Readable && pageIndex >= 0 && pageIndex < _textures.Count)
             {
-                TextureBlitter.ClearRegion(_textures[pageIndex], entry.PixelRect);
+                TextureBlitter.ClearRegion(_textures[pageIndex], entry.Rect);
             }
 
             // Cleanup

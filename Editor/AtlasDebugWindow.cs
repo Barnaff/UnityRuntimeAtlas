@@ -23,12 +23,14 @@ namespace RuntimeAtlasPacker.Editor
         private string _selectedAtlasName;
         
         private int _selectedTab;
-        private readonly string[] _tabNames = { "Atlases", "Renderers", "Statistics", "Tools" };
+        private readonly string[] _tabNames = { "Atlases", "Renderers", "Statistics", "Tools", "Textures" };
+        private Vector2 _texturesTabScroll;
         
         private Texture2D _draggedTexture;
         private bool _showAtlasPreview = true;
         private float _previewZoom = 1f;
         private Vector2 _previewScroll;
+        private int _selectedPageIndex = 0; // For multi-page preview
         
         private SearchField _searchField;
         private string _searchString = "";
@@ -41,6 +43,10 @@ namespace RuntimeAtlasPacker.Editor
         private List<AtlasInfo> _atlasInfoCache = new();
         private List<RendererInfo> _rendererInfoCache = new();
         private GlobalStats _globalStats;
+        
+        // Tools tab fields
+        private string _newAtlasName = "";
+        private int _newAtlasSize = 1024;
         
         [MenuItem("Window/Runtime Atlas Packer/Debug Window")]
         public static void ShowWindow()
@@ -86,7 +92,20 @@ namespace RuntimeAtlasPacker.Editor
             }
             else if (state == PlayModeStateChange.EnteredEditMode)
             {
+                // Clear cache when returning to edit mode
+                _atlasInfoCache.Clear();
+                _rendererInfoCache.Clear();
+                _selectedAtlas = null;
+                _selectedEntry = null;
                 RefreshData();
+                Repaint();
+                Debug.Log("[AtlasDebugWindow] Edit mode entered - data cleared and refreshed");
+            }
+            else if (state == PlayModeStateChange.ExitingPlayMode || state == PlayModeStateChange.ExitingEditMode)
+            {
+                // Clear references to prevent null refs
+                _selectedAtlas = null;
+                _selectedEntry = null;
             }
         }
 
@@ -356,9 +375,11 @@ namespace RuntimeAtlasPacker.Editor
 
         private long CalculateMemoryUsage(RuntimeAtlas atlas)
         {
-            if (atlas?.Texture == null) return 0;
+            if (atlas == null) return 0;
             
-            var tex = atlas.Texture;
+            int pageCount = atlas.PageCount;
+            if (pageCount == 0) return 0;
+            
             int bpp = 4; // Assume RGBA32
             
             switch (atlas.Settings.Format)
@@ -376,14 +397,26 @@ namespace RuntimeAtlasPacker.Editor
                     break;
             }
             
-            long size = (long)tex.width * tex.height * bpp;
+            long totalSize = 0;
             
-            if (atlas.Settings.GenerateMipMaps)
+            // Calculate size for each page
+            for (int i = 0; i < pageCount; i++)
             {
-                size = (long)(size * 1.33f); // Mipmaps add ~33%
+                var tex = atlas.GetTexture(i);
+                if (tex != null)
+                {
+                    long pageSize = (long)tex.width * tex.height * bpp;
+                    
+                    if (atlas.Settings.GenerateMipMaps)
+                    {
+                        pageSize = (long)(pageSize * 1.33f); // Mipmaps add ~33%
+                    }
+                    
+                    totalSize += pageSize;
+                }
             }
             
-            return size;
+            return totalSize;
         }
 
         private void CalculateGlobalStats()
@@ -422,6 +455,9 @@ namespace RuntimeAtlasPacker.Editor
                     break;
                 case 3:
                     DrawToolsTab();
+                    break;
+                case 4:
+                    DrawTexturesTab();
                     break;
             }
         }
@@ -580,6 +616,29 @@ namespace RuntimeAtlasPacker.Editor
             EditorGUILayout.BeginVertical("box");
             EditorGUILayout.LabelField("Info", EditorStyles.boldLabel);
             EditorGUILayout.LabelField($"Size: {_selectedAtlas.Width}x{_selectedAtlas.Height}");
+            
+            // Page info with color coding
+            int pageCount = _selectedAtlas.PageCount;
+            int maxPages = _selectedAtlas.Settings.MaxPageCount;
+            string pageInfo = maxPages == -1 
+                ? $"{pageCount} (unlimited)" 
+                : $"{pageCount} / {maxPages}";
+            
+            EditorGUILayout.BeginHorizontal();
+            EditorGUILayout.LabelField("Pages:", GUILayout.Width(100));
+            
+            var oldColor = GUI.color;
+            if (maxPages != -1 && pageCount >= maxPages)
+                GUI.color = Color.red; // At limit
+            else if (maxPages != -1 && pageCount >= maxPages * 0.8f)
+                GUI.color = Color.yellow; // Near limit
+            else
+                GUI.color = Color.green; // OK
+                
+            EditorGUILayout.LabelField(pageInfo);
+            GUI.color = oldColor;
+            EditorGUILayout.EndHorizontal();
+            
             EditorGUILayout.LabelField($"Entries: {_selectedAtlas.EntryCount}");
             EditorGUILayout.LabelField($"Fill Ratio: {_selectedAtlas.FillRatio:P1}");
             EditorGUILayout.LabelField($"Memory: {FormatBytes(CalculateMemoryUsage(_selectedAtlas))}");
@@ -636,6 +695,42 @@ namespace RuntimeAtlasPacker.Editor
 
         private void DrawAtlasPreview()
         {
+            // Page selector for multi-page atlases
+            int pageCount = _selectedAtlas.PageCount;
+            if (pageCount > 1)
+            {
+                EditorGUILayout.BeginHorizontal();
+                EditorGUILayout.LabelField("Page:", GUILayout.Width(40));
+                
+                // Ensure selected page is valid
+                if (_selectedPageIndex >= pageCount)
+                    _selectedPageIndex = 0;
+                
+                // Page navigation
+                GUI.enabled = _selectedPageIndex > 0;
+                if (GUILayout.Button("◄", GUILayout.Width(30)))
+                {
+                    _selectedPageIndex--;
+                }
+                GUI.enabled = true;
+                
+                _selectedPageIndex = EditorGUILayout.IntSlider(_selectedPageIndex, 0, pageCount - 1);
+                
+                GUI.enabled = _selectedPageIndex < pageCount - 1;
+                if (GUILayout.Button("►", GUILayout.Width(30)))
+                {
+                    _selectedPageIndex++;
+                }
+                GUI.enabled = true;
+                
+                EditorGUILayout.LabelField($"of {pageCount - 1}", GUILayout.Width(50));
+                EditorGUILayout.EndHorizontal();
+            }
+            else
+            {
+                _selectedPageIndex = 0; // Reset for single-page atlases
+            }
+            
             EditorGUILayout.BeginHorizontal();
             EditorGUILayout.LabelField("Zoom:", GUILayout.Width(40));
             _previewZoom = EditorGUILayout.Slider(_previewZoom, 0.1f, 2f);
@@ -645,12 +740,20 @@ namespace RuntimeAtlasPacker.Editor
             }
             EditorGUILayout.EndHorizontal();
             
+            // Get the texture for the selected page
+            var pageTexture = _selectedAtlas.GetTexture(_selectedPageIndex);
+            if (pageTexture == null)
+            {
+                EditorGUILayout.HelpBox($"Page {_selectedPageIndex} texture is null.", MessageType.Warning);
+                return;
+            }
+            
             // Calculate available width (window width - left panel - splitter - margins)
             float availableWidth = position.width - 250 - 20 - 40; // 250=list, 20=splitter+margins, 40=scrollbar buffer
             float previewSize = availableWidth * _previewZoom;
             
             // Calculate aspect ratio
-            float aspect = (float)_selectedAtlas.Height / _selectedAtlas.Width;
+            float aspect = (float)pageTexture.height / pageTexture.width;
             float previewHeight = previewSize * aspect;
             
             _previewScroll = EditorGUILayout.BeginScrollView(_previewScroll, 
@@ -658,25 +761,45 @@ namespace RuntimeAtlasPacker.Editor
             
             var rect = GUILayoutUtility.GetRect(previewSize, previewHeight, GUILayout.ExpandWidth(false));
             
-            if (_selectedAtlas.Texture != null)
+            EditorGUI.DrawPreviewTexture(rect, pageTexture, null, ScaleMode.ScaleToFit);
+            
+            // Draw entry highlights for entries on this page
+            if (_selectedEntry != null && _selectedEntry.IsValid && _selectedEntry.TextureIndex == _selectedPageIndex)
             {
-                EditorGUI.DrawPreviewTexture(rect, _selectedAtlas.Texture, null, ScaleMode.ScaleToFit);
+                var uvRect = _selectedEntry.UV;
+                var highlightRect = new Rect(
+                    rect.x + uvRect.x * rect.width,
+                    rect.y + (1 - uvRect.y - uvRect.height) * rect.height,
+                    uvRect.width * rect.width,
+                    uvRect.height * rect.height
+                );
                 
-                // Draw entry highlight
-                if (_selectedEntry != null && _selectedEntry.IsValid)
-                {
-                    var uvRect = _selectedEntry.UV;
-                    var highlightRect = new Rect(
-                        rect.x + uvRect.x * rect.width,
-                        rect.y + (1 - uvRect.y - uvRect.height) * rect.height,
-                        uvRect.width * rect.width,
-                        uvRect.height * rect.height
-                    );
-                    
-                    Handles.DrawSolidRectangleWithOutline(highlightRect, 
-                        new Color(1, 1, 0, 0.2f), Color.yellow);
-                }
+                Handles.DrawSolidRectangleWithOutline(highlightRect, 
+                    new Color(1, 1, 0, 0.2f), Color.yellow);
             }
+            
+            // Draw all entries on this page with semi-transparent outlines
+            var entries = _selectedAtlas.GetAllEntries().Where(e => e.TextureIndex == _selectedPageIndex).ToList();
+            foreach (var entry in entries)
+            {
+                if (entry == _selectedEntry) continue; // Already drawn above
+                
+                var uvRect = entry.UV;
+                var entryRect = new Rect(
+                    rect.x + uvRect.x * rect.width,
+                    rect.y + (1 - uvRect.y - uvRect.height) * rect.height,
+                    uvRect.width * rect.width,
+                    uvRect.height * rect.height
+                );
+                
+                Handles.DrawSolidRectangleWithOutline(entryRect, 
+                    new Color(0, 1, 0, 0.05f), new Color(0, 1, 0, 0.3f));
+            }
+            
+            // Show entry count for this page
+            EditorGUI.LabelField(new Rect(rect.x + 5, rect.y + 5, 200, 20),
+                $"Page {_selectedPageIndex}: {entries.Count} textures",
+                EditorStyles.whiteBoldLabel);
             
             EditorGUILayout.EndScrollView();
         }
@@ -984,15 +1107,25 @@ namespace RuntimeAtlasPacker.Editor
             EditorGUILayout.BeginVertical("box");
             EditorGUILayout.LabelField("Bulk Operations", EditorStyles.boldLabel);
             
+            EditorGUILayout.BeginHorizontal();
             if (GUILayout.Button("Repack All Atlases"))
             {
-                foreach (var info in _atlasInfoCache)
-                {
-                    info.Atlas.Repack();
-                }
-                RefreshData();
-                Debug.Log("Repacked all atlases");
+                RepackAllAtlases();
             }
+            
+            if (GUILayout.Button("Clear All Atlases", GUILayout.Width(150)))
+            {
+                if (EditorUtility.DisplayDialog("Clear All Atlases", 
+                    "This will dispose and clear all runtime atlases. This action cannot be undone.", 
+                    "Clear All", "Cancel"))
+                {
+                    int atlasCount = AtlasPacker.GetActiveAtlasCount();
+                    AtlasPacker.ClearAllAtlases();
+                    RefreshData();
+                    Debug.Log($"[AtlasDebugWindow] Manually cleared {atlasCount} atlases");
+                }
+            }
+            EditorGUILayout.EndHorizontal();
             
             EditorGUILayout.Space(5);
             
@@ -1052,8 +1185,29 @@ namespace RuntimeAtlasPacker.Editor
             EditorGUILayout.EndVertical();
         }
         
-        private string _newAtlasName = "NewAtlas";
-        private int _newAtlasSize = 1024;
+        private void RepackAllAtlases()
+        {
+            Debug.Log("[AtlasDebugWindow] Starting repack of all atlases...");
+            
+            foreach (var info in _atlasInfoCache)
+            {
+                if (info.Atlas != null && info.Atlas.EntryCount > 0)
+                {
+                    try
+                    {
+                        info.Atlas.Repack();
+                        Debug.Log($"[AtlasDebugWindow] Repacked atlas: {info.Name}");
+                    }
+                    catch (System.Exception ex)
+                    {
+                        Debug.LogError($"[AtlasDebugWindow] Failed to repack atlas {info.Name}: {ex.Message}");
+                    }
+                }
+            }
+            
+            RefreshData();
+            Debug.Log("[AtlasDebugWindow] Repack complete");
+        }
 
         private void ExportAtlasToPNG(RuntimeAtlas atlas, string name, string path = null)
         {
@@ -1133,6 +1287,335 @@ namespace RuntimeAtlasPacker.Editor
             public int ActiveRenderers;
             public long TotalMemoryBytes;
             public float AverageFillRatio;
+        }
+
+        private struct TextureEntryInfo
+        {
+            public int EntryId;
+            public string Name;
+            public Vector2Int Size;
+            public RectInt PixelRect;
+            public Rect UV;
+            public int TexturePageIndex;
+            public List<SpriteConnectionInfo> ConnectedSprites;
+            public long EstimatedMemoryBytes;
+        }
+
+        private struct SpriteConnectionInfo
+        {
+            public GameObject GameObject;
+            public string ComponentType;
+            public Component Component;
+            public bool IsActive;
+        }
+
+        private void DrawTexturesTab()
+        {
+            if (!EditorApplication.isPlaying)
+            {
+                EditorGUILayout.Space(50);
+                EditorGUILayout.HelpBox(
+                    "Texture view requires Play Mode.\n\nPress Play to see texture details.",
+                    MessageType.Info
+                );
+                return;
+            }
+
+            if (_atlasInfoCache.Count == 0)
+            {
+                EditorGUILayout.Space(50);
+                EditorGUILayout.HelpBox(
+                    "No runtime atlases found.\n\nCreate atlases using AtlasPacker to see texture details.",
+                    MessageType.Warning
+                );
+                return;
+            }
+
+            EditorGUILayout.BeginHorizontal();
+            
+            // Left panel - Atlas selector
+            EditorGUILayout.BeginVertical(GUILayout.Width(200));
+            EditorGUILayout.LabelField("Select Atlas:", EditorStyles.boldLabel);
+            
+            _atlasListScroll = EditorGUILayout.BeginScrollView(_atlasListScroll);
+            foreach (var info in _atlasInfoCache)
+            {
+                bool isSelected = _selectedAtlas == info.Atlas;
+                var style = new GUIStyle(isSelected ? "SelectionRect" : "box");
+                style.alignment = TextAnchor.MiddleLeft;
+                style.padding = new RectOffset(5, 5, 5, 5);
+                
+                if (GUILayout.Button("", style, GUILayout.Height(30)))
+                {
+                    _selectedAtlas = info.Atlas;
+                    _selectedAtlasName = info.Name;
+                }
+                
+                var lastRect = GUILayoutUtility.GetLastRect();
+                GUI.Label(new Rect(lastRect.x + 5, lastRect.y + 5, lastRect.width - 10, 20), 
+                    $"{info.Name} ({info.EntryCount})", EditorStyles.label);
+            }
+            EditorGUILayout.EndScrollView();
+            EditorGUILayout.EndVertical();
+            
+            // Splitter
+            GUILayout.Box("", GUILayout.Width(2), GUILayout.ExpandHeight(true));
+            
+            // Right panel - Texture details
+            _texturesTabScroll = EditorGUILayout.BeginScrollView(_texturesTabScroll);
+            
+            if (_selectedAtlas != null)
+            {
+                DrawAtlasTextureDetails();
+            }
+            else
+            {
+                EditorGUILayout.HelpBox("Select an atlas from the list to view texture details.", MessageType.Info);
+            }
+            
+            EditorGUILayout.EndScrollView();
+            EditorGUILayout.EndHorizontal();
+        }
+
+        private void DrawAtlasTextureDetails()
+        {
+            // Atlas Header
+            EditorGUILayout.BeginVertical("box");
+            EditorGUILayout.LabelField($"Atlas: {_selectedAtlasName}", EditorStyles.boldLabel);
+            EditorGUILayout.LabelField($"Size: {_selectedAtlas.Width}x{_selectedAtlas.Height}");
+            
+            // Page info
+            int pageCount = _selectedAtlas.PageCount;
+            int maxPages = _selectedAtlas.Settings.MaxPageCount;
+            string pageInfo = maxPages == -1 
+                ? $"Pages: {pageCount} (unlimited)" 
+                : $"Pages: {pageCount} / {maxPages}";
+            EditorGUILayout.LabelField(pageInfo);
+            
+            EditorGUILayout.LabelField($"Total Textures: {_selectedAtlas.EntryCount}");
+            EditorGUILayout.LabelField($"Fill Ratio: {_selectedAtlas.FillRatio:P1}");
+            EditorGUILayout.LabelField($"Memory: {FormatBytes(CalculateMemoryUsage(_selectedAtlas))}");
+            EditorGUILayout.EndVertical();
+            
+            EditorGUILayout.Space(10);
+            
+            // Get all entries and build texture info
+            var entries = _selectedAtlas.GetAllEntries().ToList();
+            if (entries.Count == 0)
+            {
+                EditorGUILayout.HelpBox("No textures in this atlas.", MessageType.Info);
+                return;
+            }
+
+            // Build texture info with sprite connections
+            var textureInfos = new List<TextureEntryInfo>();
+            foreach (var entry in entries)
+            {
+                var connectedSprites = FindConnectedSprites(entry);
+                
+                var textureInfo = new TextureEntryInfo
+                {
+                    EntryId = entry.Id,
+                    Name = entry.Name ?? $"Entry_{entry.Id}",
+                    Size = new Vector2Int(entry.Width, entry.Height),
+                    PixelRect = entry.Rect,
+                    UV = entry.UV,
+                    TexturePageIndex = entry.TextureIndex,
+                    ConnectedSprites = connectedSprites,
+                    EstimatedMemoryBytes = entry.Width * entry.Height * 4 // RGBA32
+                };
+                
+                textureInfos.Add(textureInfo);
+            }
+
+            // Sort by size (largest first)
+            textureInfos = textureInfos.OrderByDescending(t => t.Size.x * t.Size.y).ToList();
+
+            // Summary stats
+            EditorGUILayout.BeginVertical("box");
+            EditorGUILayout.LabelField("Texture Summary", EditorStyles.boldLabel);
+            EditorGUILayout.BeginHorizontal();
+            
+            DrawStatBox("Total Textures", textureInfos.Count.ToString(), EditorGUIUtility.IconContent("d_PreTextureMipMapHigh"));
+            DrawStatBox("With Sprites", textureInfos.Count(t => t.ConnectedSprites.Count > 0).ToString(), EditorGUIUtility.IconContent("d_Prefab Icon"));
+            DrawStatBox("Orphaned", textureInfos.Count(t => t.ConnectedSprites.Count == 0).ToString(), EditorGUIUtility.IconContent("d_console.warnicon.sml"));
+            DrawStatBox("Total Sprites", textureInfos.Sum(t => t.ConnectedSprites.Count).ToString(), EditorGUIUtility.IconContent("d_Grid.Default"));
+            
+            EditorGUILayout.EndHorizontal();
+            EditorGUILayout.EndVertical();
+            
+            EditorGUILayout.Space(10);
+
+            // Texture list with details
+            EditorGUILayout.LabelField("Texture Details", EditorStyles.boldLabel);
+            EditorGUILayout.Space(5);
+
+            // Draw each texture entry
+            foreach (var textureInfo in textureInfos)
+            {
+                DrawTextureEntryDetail(textureInfo);
+            }
+        }
+
+        private void DrawTextureEntryDetail(TextureEntryInfo textureInfo)
+        {
+            EditorGUILayout.BeginVertical("box");
+            
+            // Header with texture name and ID
+            EditorGUILayout.BeginHorizontal();
+            
+            var iconContent = textureInfo.ConnectedSprites.Count > 0 
+                ? EditorGUIUtility.IconContent("d_PreTextureMipMapHigh") 
+                : EditorGUIUtility.IconContent("d_console.warnicon.sml");
+            GUILayout.Label(iconContent, GUILayout.Width(20), GUILayout.Height(20));
+            
+            EditorGUILayout.LabelField($"{textureInfo.Name} (ID: {textureInfo.EntryId})", EditorStyles.boldLabel);
+            
+            // Size indicator
+            var sizeColor = textureInfo.Size.x * textureInfo.Size.y > 128 * 128 ? Color.yellow : Color.green;
+            var oldColor = GUI.color;
+            GUI.color = sizeColor;
+            GUILayout.Label($"{textureInfo.Size.x}x{textureInfo.Size.y}", EditorStyles.miniLabel, GUILayout.Width(80));
+            GUI.color = oldColor;
+            
+            EditorGUILayout.EndHorizontal();
+            
+            // Texture details
+            EditorGUILayout.BeginHorizontal();
+            EditorGUILayout.LabelField($"Position: ({textureInfo.PixelRect.x}, {textureInfo.PixelRect.y})", GUILayout.Width(150));
+            EditorGUILayout.LabelField($"Page: {textureInfo.TexturePageIndex}", GUILayout.Width(80));
+            EditorGUILayout.LabelField($"Memory: {FormatBytes(textureInfo.EstimatedMemoryBytes)}", GUILayout.Width(100));
+            EditorGUILayout.EndHorizontal();
+            
+            EditorGUILayout.BeginHorizontal();
+            EditorGUILayout.LabelField($"UV: ({textureInfo.UV.x:F3}, {textureInfo.UV.y:F3}, {textureInfo.UV.width:F3}, {textureInfo.UV.height:F3})", GUILayout.Width(300));
+            EditorGUILayout.EndHorizontal();
+            
+            // Connected sprites section
+            if (textureInfo.ConnectedSprites.Count > 0)
+            {
+                EditorGUILayout.Space(5);
+                var foldoutRect = EditorGUILayout.GetControlRect();
+                var foldoutKey = $"texture_sprites_{textureInfo.EntryId}";
+                var isExpanded = EditorPrefs.GetBool(foldoutKey, false);
+                isExpanded = EditorGUI.Foldout(foldoutRect, isExpanded, 
+                    $"Connected Sprites ({textureInfo.ConnectedSprites.Count})", true);
+                EditorPrefs.SetBool(foldoutKey, isExpanded);
+                
+                if (isExpanded)
+                {
+                    EditorGUI.indentLevel++;
+                    
+                    foreach (var sprite in textureInfo.ConnectedSprites)
+                    {
+                        DrawSpriteConnection(sprite);
+                    }
+                    
+                    EditorGUI.indentLevel--;
+                }
+            }
+            else
+            {
+                EditorGUILayout.Space(3);
+                GUI.color = new Color(1f, 0.8f, 0f);
+                EditorGUILayout.LabelField("⚠ No sprites connected (orphaned texture)", EditorStyles.miniLabel);
+                GUI.color = Color.white;
+            }
+            
+            EditorGUILayout.EndVertical();
+            EditorGUILayout.Space(3);
+        }
+
+        private void DrawSpriteConnection(SpriteConnectionInfo sprite)
+        {
+            EditorGUILayout.BeginHorizontal("box");
+            
+            // Active indicator
+            var statusColor = sprite.IsActive ? Color.green : Color.gray;
+            var oldColor = GUI.color;
+            GUI.color = statusColor;
+            GUILayout.Label("●", GUILayout.Width(15));
+            GUI.color = oldColor;
+            
+            // Component type icon
+            var icon = sprite.ComponentType switch
+            {
+                "AtlasSpriteRenderer" => EditorGUIUtility.IconContent("d_SpriteRenderer Icon"),
+                "AtlasImage" => EditorGUIUtility.IconContent("d_Image Icon"),
+                "AtlasRawImage" => EditorGUIUtility.IconContent("d_RawImage Icon"),
+                _ => EditorGUIUtility.IconContent("d_GameObject Icon")
+            };
+            GUILayout.Label(icon, GUILayout.Width(20), GUILayout.Height(16));
+            
+            // GameObject name (clickable)
+            if (GUILayout.Button(sprite.GameObject.name, EditorStyles.linkLabel))
+            {
+                Selection.activeGameObject = sprite.GameObject;
+                EditorGUIUtility.PingObject(sprite.GameObject);
+            }
+            
+            // Component type
+            EditorGUILayout.LabelField($"({sprite.ComponentType})", EditorStyles.miniLabel, GUILayout.Width(150));
+            
+            // Hierarchy path
+            var path = GetGameObjectPath(sprite.GameObject);
+            EditorGUILayout.LabelField(path, EditorStyles.miniLabel);
+            
+            EditorGUILayout.EndHorizontal();
+        }
+
+        private void DrawStatBox(string label, string value, GUIContent icon)
+        {
+            EditorGUILayout.BeginVertical("box", GUILayout.Width(120), GUILayout.Height(50));
+            
+            EditorGUILayout.BeginHorizontal();
+            if (icon != null)
+            {
+                GUILayout.Label(icon, GUILayout.Width(20), GUILayout.Height(20));
+            }
+            EditorGUILayout.LabelField(label, EditorStyles.miniLabel);
+            EditorGUILayout.EndHorizontal();
+            
+            EditorGUILayout.LabelField(value, EditorStyles.boldLabel);
+            
+            EditorGUILayout.EndVertical();
+        }
+
+        private List<SpriteConnectionInfo> FindConnectedSprites(AtlasEntry entry)
+        {
+            var connections = new List<SpriteConnectionInfo>();
+            
+            foreach (var rendererInfo in _rendererInfoCache)
+            {
+                if (rendererInfo.EntryId == entry.Id)
+                {
+                    connections.Add(new SpriteConnectionInfo
+                    {
+                        GameObject = rendererInfo.GameObject,
+                        ComponentType = rendererInfo.ComponentType,
+                        Component = rendererInfo.Component,
+                        IsActive = rendererInfo.HasEntry && rendererInfo.GameObject.activeInHierarchy
+                    });
+                }
+            }
+            
+            return connections;
+        }
+
+        private string GetGameObjectPath(GameObject go)
+        {
+            if (go == null) return "";
+            
+            var path = go.name;
+            var parent = go.transform.parent;
+            
+            while (parent != null)
+            {
+                path = parent.name + "/" + path;
+                parent = parent.parent;
+            }
+            
+            return path;
         }
     }
 }

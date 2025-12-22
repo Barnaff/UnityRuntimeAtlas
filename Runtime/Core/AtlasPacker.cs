@@ -1,5 +1,7 @@
 using System;
+using System.Collections;
 using System.Collections.Generic;
+using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
 using UnityEngine;
@@ -123,23 +125,95 @@ namespace RuntimeAtlasPacker
         /// <summary>
         /// Pack multiple textures into the default atlas.
         /// Automatically creates overflow atlases when needed.
+        /// Uses efficient batching to minimize frame drops.
         /// </summary>
         public static AtlasEntry[] PackBatch(params Texture2D[] textures)
         {
+            if (textures == null || textures.Length == 0)
+                return Array.Empty<AtlasEntry>();
+
             lock (_lock)
             {
-                var entries = new List<AtlasEntry>();
+                // Use AddBatch on the atlas directly for much better performance
+                var entries = Default.AddBatch(textures);
                 
-                foreach (var texture in textures)
+                // If some failed due to full atlas, try overflow atlases
+                if (entries.Length < textures.Length)
                 {
-                    var entry = Pack(texture); // Use Pack which handles overflow
-                    if (entry != null)
+                    var failedTextures = new List<Texture2D>();
+                    var successIds = new HashSet<int>(entries.Select(e => Array.IndexOf(textures, e.Name)));
+                    
+                    for (int i = 0; i < textures.Length; i++)
                     {
-                        entries.Add(entry);
+                        if (!successIds.Contains(i))
+                        {
+                            failedTextures.Add(textures[i]);
+                        }
+                    }
+                    
+                    if (failedTextures.Count > 0)
+                    {
+                        Debug.Log($"[AtlasPacker] Default atlas couldn't fit {failedTextures.Count} textures, trying overflow atlases...");
+                        
+                        // Try overflow atlases
+                        int overflowIndex = 1;
+                        while (failedTextures.Count > 0)
+                        {
+                            string overflowName = $"[Default_Overflow_{overflowIndex}]";
+                            RuntimeAtlas overflowAtlas;
+                            
+                            if (_namedAtlases.TryGetValue(overflowName, out overflowAtlas))
+                            {
+                                // Try existing overflow
+                                var overflowEntries = overflowAtlas.AddBatch(failedTextures.ToArray());
+                                entries = entries.Concat(overflowEntries).ToArray();
+                                
+                                if (overflowEntries.Length < failedTextures.Count)
+                                {
+                                    // Remove successful ones from failed list
+                                    var successNames = new HashSet<string>(overflowEntries.Select(e => e.Name));
+                                    failedTextures.RemoveAll(t => successNames.Contains(t.name));
+                                }
+                                else
+                                {
+                                    break; // All packed
+                                }
+                            }
+                            else
+                            {
+                                // Create new overflow atlas
+                                Debug.Log($"[AtlasPacker] Creating overflow atlas: {overflowName}");
+                                overflowAtlas = new RuntimeAtlas(Default.Settings);
+                                _namedAtlases[overflowName] = overflowAtlas;
+                                _overflowCounters["[Default]"] = overflowIndex;
+                                
+                                var overflowEntries = overflowAtlas.AddBatch(failedTextures.ToArray());
+                                entries = entries.Concat(overflowEntries).ToArray();
+                                
+                                if (overflowEntries.Length < failedTextures.Count)
+                                {
+                                    var successNames = new HashSet<string>(overflowEntries.Select(e => e.Name));
+                                    failedTextures.RemoveAll(t => successNames.Contains(t.name));
+                                }
+                                else
+                                {
+                                    break;
+                                }
+                            }
+                            
+                            overflowIndex++;
+                            
+                            // Safety check to prevent infinite loop
+                            if (overflowIndex > 100)
+                            {
+                                Debug.LogError($"[AtlasPacker] Exceeded maximum overflow atlases. {failedTextures.Count} textures could not be packed.");
+                                break;
+                            }
+                        }
                     }
                 }
                 
-                return entries.ToArray();
+                return entries;
             }
         }
 
@@ -346,22 +420,207 @@ namespace RuntimeAtlasPacker
         }
 
         /// <summary>
-        /// Create a standalone atlas with the specified settings.
-        /// This atlas is not managed by the static API.
+        /// Clear and dispose all atlases. Use this to prevent memory leaks between play mode runs.
         /// </summary>
-        public static RuntimeAtlas Create(AtlasSettings settings)
+        public static void ClearAllAtlases()
         {
-            return new RuntimeAtlas(settings);
+            lock (_lock)
+            {
+                Debug.Log($"[AtlasPacker] Clearing {_namedAtlases.Count + (_defaultAtlas != null ? 1 : 0)} atlases");
+
+                // Dispose default atlas
+                if (_defaultAtlas != null)
+                {
+                    _defaultAtlas.Dispose();
+                    _defaultAtlas = null;
+                    Debug.Log("[AtlasPacker] Disposed default atlas");
+                }
+
+                // Dispose all named atlases
+                foreach (var kvp in _namedAtlases)
+                {
+                    if (kvp.Value != null)
+                    {
+                        kvp.Value.Dispose();
+                        Debug.Log($"[AtlasPacker] Disposed atlas: {kvp.Key}");
+                    }
+                }
+
+                // Clear collections
+                _namedAtlases.Clear();
+                _overflowCounters.Clear();
+                
+                Debug.Log("[AtlasPacker] All atlases cleared");
+            }
         }
 
         /// <summary>
-        /// Create a standalone atlas with preset settings.
+        /// Get count of all active atlases (for debugging/monitoring).
         /// </summary>
-        public static RuntimeAtlas CreateMobile() => new RuntimeAtlas(AtlasSettings.Mobile);
-        
+        public static int GetActiveAtlasCount()
+        {
+            lock (_lock)
+            {
+                return _namedAtlases.Count + (_defaultAtlas != null ? 1 : 0);
+            }
+        }
+
         /// <summary>
-        /// Create a high-quality atlas with preset settings.
+        /// Get names of all active atlases (for debugging/monitoring).
         /// </summary>
-        public static RuntimeAtlas CreateHighQuality() => new RuntimeAtlas(AtlasSettings.HighQuality);
+        public static string[] GetActiveAtlasNames()
+        {
+            lock (_lock)
+            {
+                var names = new List<string>();
+                
+                if (_defaultAtlas != null)
+                    names.Add("[Default]");
+                
+                names.AddRange(_namedAtlases.Keys);
+                
+                return names.ToArray();
+            }
+        }
+
+        /// <summary>
+        /// Pack multiple textures with progress callback and frame spreading.
+        /// Use this for large batches to avoid frame drops.
+        /// Returns successfully packed entries via callback.
+        /// </summary>
+        public static IEnumerator PackBatchAsync(Texture2D[] textures, Action<AtlasEntry[], float> onProgress = null, int texturesPerFrame = 5)
+        {
+            if (textures == null || textures.Length == 0)
+            {
+                onProgress?.Invoke(Array.Empty<AtlasEntry>(), 1f);
+                yield break;
+            }
+
+            var allEntries = new List<AtlasEntry>();
+            int processed = 0;
+            int batchSize = Mathf.Max(1, texturesPerFrame);
+
+            Debug.Log($"[AtlasPacker] Starting async batch pack of {textures.Length} textures ({batchSize} per frame)");
+
+            lock (_lock)
+            {
+                // Process in smaller batches to spread across frames
+                for (int i = 0; i < textures.Length; i += batchSize)
+                {
+                    int count = Mathf.Min(batchSize, textures.Length - i);
+                    var batch = new Texture2D[count];
+                    Array.Copy(textures, i, batch, 0, count);
+
+                    // Use the optimized AddBatch
+                    var entries = Default.AddBatch(batch);
+                    allEntries.AddRange(entries);
+
+                    // Handle overflow if needed
+                    if (entries.Length < batch.Length)
+                    {
+                        var failed = batch.Where(t => !entries.Any(e => e.Name == t.name)).ToArray();
+                        if (failed.Length > 0)
+                        {
+                            // Try overflow atlases
+                            var overflowEntries = TryPackInOverflow(failed);
+                            allEntries.AddRange(overflowEntries);
+                        }
+                    }
+
+                    processed += count;
+                    float progress = (float)processed / textures.Length;
+                    onProgress?.Invoke(allEntries.ToArray(), progress);
+
+                    // Yield to next frame
+                    yield return null;
+                }
+            }
+
+            Debug.Log($"[AtlasPacker] Async batch complete: {allEntries.Count}/{textures.Length} textures packed");
+            onProgress?.Invoke(allEntries.ToArray(), 1f);
+        }
+
+        /// <summary>
+        /// Helper method to try packing failed textures in overflow atlases.
+        /// </summary>
+        private static List<AtlasEntry> TryPackInOverflow(Texture2D[] textures)
+        {
+            var entries = new List<AtlasEntry>();
+            var remaining = new List<Texture2D>(textures);
+
+            int overflowIndex = 1;
+            while (remaining.Count > 0 && overflowIndex <= 100)
+            {
+                string overflowName = $"[Default_Overflow_{overflowIndex}]";
+                RuntimeAtlas overflowAtlas;
+
+                if (!_namedAtlases.TryGetValue(overflowName, out overflowAtlas))
+                {
+                    // Create new overflow atlas
+                    overflowAtlas = new RuntimeAtlas(Default.Settings);
+                    _namedAtlases[overflowName] = overflowAtlas;
+                    _overflowCounters["[Default]"] = overflowIndex;
+                    Debug.Log($"[AtlasPacker] Created overflow atlas: {overflowName}");
+                }
+
+                var overflowEntries = overflowAtlas.AddBatch(remaining.ToArray());
+                entries.AddRange(overflowEntries);
+
+                if (overflowEntries.Length > 0)
+                {
+                    var successNames = new HashSet<string>(overflowEntries.Select(e => e.Name));
+                    remaining.RemoveAll(t => successNames.Contains(t.name));
+                }
+                else
+                {
+                    // Atlas couldn't fit anything, move to next
+                    overflowIndex++;
+                }
+            }
+
+            return entries;
+        }
+
+        /// <summary>
+        /// Pack textures for a named atlas asynchronously with frame spreading.
+        /// </summary>
+        public static IEnumerator PackBatchAsync(string atlasName, Texture2D[] textures, Action<AtlasEntry[], float> onProgress = null, int texturesPerFrame = 5)
+        {
+            if (textures == null || textures.Length == 0)
+            {
+                onProgress?.Invoke(Array.Empty<AtlasEntry>(), 1f);
+                yield break;
+            }
+
+            var allEntries = new List<AtlasEntry>();
+            int processed = 0;
+            int batchSize = Mathf.Max(1, texturesPerFrame);
+
+            Debug.Log($"[AtlasPacker] Starting async batch pack for '{atlasName}': {textures.Length} textures");
+
+            lock (_lock)
+            {
+                var atlas = GetOrCreate(atlasName);
+
+                for (int i = 0; i < textures.Length; i += batchSize)
+                {
+                    int count = Mathf.Min(batchSize, textures.Length - i);
+                    var batch = new Texture2D[count];
+                    Array.Copy(textures, i, batch, 0, count);
+
+                    var entries = atlas.AddBatch(batch);
+                    allEntries.AddRange(entries);
+
+                    processed += count;
+                    float progress = (float)processed / textures.Length;
+                    onProgress?.Invoke(allEntries.ToArray(), progress);
+
+                    yield return null;
+                }
+            }
+
+            Debug.Log($"[AtlasPacker] Async batch complete for '{atlasName}': {allEntries.Count}/{textures.Length} packed");
+            onProgress?.Invoke(allEntries.ToArray(), 1f);
+        }
     }
 }
