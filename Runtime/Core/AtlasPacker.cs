@@ -2,8 +2,6 @@ using System;
 using System.Collections;
 using System.Collections.Generic;
 using System.Linq;
-using System.Threading;
-using System.Threading.Tasks;
 using UnityEngine;
 
 namespace RuntimeAtlasPacker
@@ -72,18 +70,24 @@ namespace RuntimeAtlasPacker
                 // Check if texture is too large or invalid
                 if (result == AddResult.TooLarge)
                 {
+#if UNITY_EDITOR
                     Debug.LogError($"[AtlasPacker] Texture is too large to fit in any atlas (MaxSize: {Default.Settings.MaxSize})");
+#endif
                     return null;
                 }
                 
                 if (result == AddResult.InvalidTexture)
                 {
+#if UNITY_EDITOR
                     Debug.LogError("[AtlasPacker] Invalid texture provided");
+#endif
                     return null;
                 }
 
                 // Default atlas is full, try overflow atlases
+#if UNITY_EDITOR
                 Debug.Log("[AtlasPacker] Default atlas is full, checking overflow atlases...");
+#endif
 
                 // Try existing overflow atlases
                 var overflowIndex = 1;
@@ -96,7 +100,9 @@ namespace RuntimeAtlasPacker
                         (result, entry) = overflowAtlas.Add(texture);
                         if (result == AddResult.Success)
                         {
+#if UNITY_EDITOR
                             Debug.Log($"[AtlasPacker] Added to existing overflow atlas: {overflowName}");
+#endif
                             return entry;
                         }
                         overflowIndex++;
@@ -104,7 +110,9 @@ namespace RuntimeAtlasPacker
                     else
                     {
                         // Create new overflow atlas
+#if UNITY_EDITOR
                         Debug.Log($"[AtlasPacker] Creating new overflow atlas: {overflowName}");
+#endif
                         var newAtlas = new RuntimeAtlas(Default.Settings);
                         _namedAtlases[overflowName] = newAtlas;
                         _overflowCounters["[Default]"] = overflowIndex;
@@ -112,11 +120,15 @@ namespace RuntimeAtlasPacker
                         (result, entry) = newAtlas.Add(texture);
                         if (result == AddResult.Success)
                         {
+#if UNITY_EDITOR
                             Debug.Log($"[AtlasPacker] Successfully added to new overflow atlas: {overflowName}");
+#endif
                             return entry;
                         }
                         
+#if UNITY_EDITOR
                         Debug.LogError($"[AtlasPacker] Failed to add texture even to new overflow atlas! Result: {result}");
+#endif
                         return null;
                     }
                 }
@@ -157,7 +169,9 @@ namespace RuntimeAtlasPacker
                     
                     if (failedTextures.Count > 0)
                     {
+#if UNITY_EDITOR
                         Debug.Log($"[AtlasPacker] Default atlas couldn't fit {failedTextures.Count} textures, trying overflow atlases...");
+#endif
                         
                         // Try overflow atlases
                         var overflowIndex = 1;
@@ -186,7 +200,9 @@ namespace RuntimeAtlasPacker
                             else
                             {
                                 // Create new overflow atlas
+#if UNITY_EDITOR
                                 Debug.Log($"[AtlasPacker] Creating overflow atlas: {overflowName}");
+#endif
                                 overflowAtlas = new RuntimeAtlas(Default.Settings);
                                 _namedAtlases[overflowName] = overflowAtlas;
                                 _overflowCounters["[Default]"] = overflowIndex;
@@ -210,7 +226,9 @@ namespace RuntimeAtlasPacker
                             // Safety check to prevent infinite loop
                             if (overflowIndex > 100)
                             {
+#if UNITY_EDITOR
                                 Debug.LogError($"[AtlasPacker] Exceeded maximum overflow atlases. {failedTextures.Count} textures could not be packed.");
+#endif
                                 break;
                             }
                         }
@@ -230,7 +248,9 @@ namespace RuntimeAtlasPacker
             var (result, entry) = Default.Add(sprite.texture);
             if (result != AddResult.Success || entry == null)
             {
+#if UNITY_EDITOR
                 Debug.LogWarning($"[AtlasPacker] Failed to pack sprite '{sprite.name}': {result}");
+#endif
                 return null;
             }
             return entry.CreateSprite(pixelsPerUnit ?? sprite.pixelsPerUnit, sprite.pivot / sprite.rect.size);
@@ -430,14 +450,18 @@ namespace RuntimeAtlasPacker
         {
             lock (_lock)
             {
+#if UNITY_EDITOR
                 Debug.Log($"[AtlasPacker] Clearing {_namedAtlases.Count + (_defaultAtlas != null ? 1 : 0)} atlases");
+#endif
 
                 // Dispose default atlas
                 if (_defaultAtlas != null)
                 {
                     _defaultAtlas.Dispose();
                     _defaultAtlas = null;
+#if UNITY_EDITOR
                     Debug.Log("[AtlasPacker] Disposed default atlas");
+#endif
                 }
 
                 // Dispose all named atlases
@@ -446,7 +470,9 @@ namespace RuntimeAtlasPacker
                     if (kvp.Value != null)
                     {
                         kvp.Value.Dispose();
+#if UNITY_EDITOR
                         Debug.Log($"[AtlasPacker] Disposed atlas: {kvp.Key}");
+#endif
                     }
                 }
 
@@ -454,7 +480,9 @@ namespace RuntimeAtlasPacker
                 _namedAtlases.Clear();
                 _overflowCounters.Clear();
                 
+#if UNITY_EDITOR
                 Debug.Log("[AtlasPacker] All atlases cleared");
+#endif
             }
         }
 

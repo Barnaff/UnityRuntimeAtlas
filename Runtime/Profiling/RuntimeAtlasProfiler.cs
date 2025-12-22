@@ -9,15 +9,11 @@ namespace RuntimeAtlasPacker
     /// </summary>
     public static class RuntimeAtlasProfiler
     {
+#if UNITY_EDITOR
         public static event Action<ProfileData> OnOperationLogged;
         
         // Always enabled in editor, can be disabled in builds
-        private static bool _enabled = 
-#if UNITY_EDITOR
-            true;
-#else
-            false;
-#endif
+        private static bool _enabled = true;
         
         public static bool Enabled
         {
@@ -25,13 +21,11 @@ namespace RuntimeAtlasPacker
             set => _enabled = value;
         }
 
-#if UNITY_EDITOR
         [UnityEngine.RuntimeInitializeOnLoadMethod(UnityEngine.RuntimeInitializeLoadType.SubsystemRegistration)]
         private static void Initialize()
         {
             _enabled = true;
         }
-#endif
 
         /// <summary>
         /// Begin timing an operation. Returns a handle to stop timing.
@@ -53,6 +47,7 @@ namespace RuntimeAtlasPacker
         /// <summary>
         /// End timing an operation and log it.
         /// </summary>
+        [System.Diagnostics.Conditional("UNITY_EDITOR")]
         public static void End(ProfileSession session)
         {
             if (!_enabled || session.StopwatchStart == 0) return;
@@ -70,15 +65,14 @@ namespace RuntimeAtlasPacker
             
             OnOperationLogged?.Invoke(data);
             
-#if UNITY_EDITOR
             // Bridge to editor profiler if available
             NotifyEditorProfiler(data);
-#endif
         }
 
         /// <summary>
         /// Log an operation with known duration.
         /// </summary>
+        [System.Diagnostics.Conditional("UNITY_EDITOR")]
         public static void Log(string operationType, double durationMs, string atlasName = null, string details = null)
         {
             if (!_enabled) return;
@@ -94,12 +88,9 @@ namespace RuntimeAtlasPacker
             
             OnOperationLogged?.Invoke(data);
             
-#if UNITY_EDITOR
             NotifyEditorProfiler(data);
-#endif
         }
 
-#if UNITY_EDITOR
         private static void NotifyEditorProfiler(ProfileData data)
         {
             // This will be called by the editor profiler window
@@ -107,6 +98,23 @@ namespace RuntimeAtlasPacker
         }
         
         public static Action<ProfileData> EditorProfilerBridge;
+#else
+        // Stub methods for non-editor builds
+        [System.Diagnostics.Conditional("UNITY_EDITOR")]
+        public static ProfileSession Begin(string operationType, string atlasName = null, string details = null)
+        {
+            return default;
+        }
+
+        [System.Diagnostics.Conditional("UNITY_EDITOR")]
+        public static void End(ProfileSession session)
+        {
+        }
+
+        [System.Diagnostics.Conditional("UNITY_EDITOR")]
+        public static void Log(string operationType, double durationMs, string atlasName = null, string details = null)
+        {
+        }
 #endif
     }
 

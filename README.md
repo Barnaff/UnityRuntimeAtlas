@@ -1,35 +1,55 @@
 # Runtime Atlas Packer
 
-High-performance runtime texture atlas packing for Unity with dynamic updates, async support, and zero-allocation design.
+High-performance runtime texture atlas packing for Unity with dynamic updates, Burst compilation, and zero-allocation design.
 
-## Features
+[![Unity Version](https://img.shields.io/badge/Unity-2021.3%2B-blue.svg)](https://unity3d.com/get-unity/download)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 
-- **Fast Packing**: Burst-compiled MaxRects and Skyline algorithms
-- **Memory Efficient**: Native containers, no GC allocations during packing
-- **Dynamic Updates**: Add/remove sprites at runtime without breaking references
-- **Auto-Growth**: Atlas automatically grows when full (configurable)
-- **Async Support**: Full async/await API for background packing
-- **Auto-Updating References**: `AtlasEntry` objects automatically update when UV coordinates change
-- **GPU Accelerated**: Uses `Graphics.CopyTexture` when available
-- **Simple API**: One-liner for common operations
+## ✨ Features
 
-## Installation
+- **⚡ Fast Packing**: Burst-compiled MaxRects and Skyline algorithms
+- **🎯 Memory Efficient**: Native containers, no GC allocations during packing
+- **🔄 Dynamic Updates**: Add/remove sprites at runtime without breaking references
+- **📈 Auto-Growth**: Atlas automatically grows when full (configurable)
+- **⏱️ Async Support**: Full async/await API for background packing
+- **🔗 Auto-Updating References**: `AtlasEntry` objects automatically update when UV coordinates change
+- **🚀 GPU Accelerated**: Uses `Graphics.CopyTexture` when available
+- **🎨 Simple API**: One-liner for common operations
+- **🖼️ UI Integration**: Built-in components for SpriteRenderer, UI Image, and RawImage
+- **🛠️ Comprehensive Tools**: Debug window, profiler, memory analyzer, and more
 
-### Via Package Manager
+## 📦 Installation
 
-Add to your `manifest.json`:
+### Via Git URL (Recommended)
+
+1. Open **Window > Package Manager**
+2. Click the **+** button
+3. Select **Add package from git URL**
+4. Paste: `https://github.com/yourusername/runtime-atlas-packer.git`
+
+### Via Package Manager (Local)
+
+1. Clone this repository
+2. Open **Window > Package Manager**
+3. Click the **+** button
+4. Select **Add package from disk**
+5. Navigate to the cloned folder and select `package.json`
+
+### Via manifest.json
+
+Add to your `Packages/manifest.json`:
 
 ```json
 {
   "dependencies": {
-    "com.gamedev.runtimeatlaspacker": "file:../path/to/RuntimeAtlasPacker"
+    "com.gamedev.runtimeatlaspacker": "https://github.com/yourusername/runtime-atlas-packer.git"
   }
 }
 ```
 
 ### Manual Installation
 
-Copy the `RuntimeAtlasPacker` folder to your `Packages` directory.
+Copy the entire `RuntimeAtlasPacker` folder to your project's `Packages` directory.
 
 ## Quick Start
 
@@ -331,21 +351,31 @@ AtlasPacker.DisposeAll();
 | `GrowthStrategy` | Double | How atlas grows when full |
 | `Algorithm` | MaxRects | Packing algorithm |
 
-## Editor Tools
+## 🛠️ Editor Tools
 
-The package includes comprehensive editor tools for debugging and managing atlases:
+The package includes comprehensive editor tools for debugging and managing atlases at runtime.
 
-### Debug Window
+### Atlas Debug Window
 **Window > Runtime Atlas Packer > Debug Window**
 
-- View all active atlases with real-time statistics
-- See all entries in each atlas with UV coordinates
-- Add/remove textures via drag-and-drop
-- Export atlases as PNG files
-- View all atlas renderers in the scene
-- Repack atlases to reclaim fragmented space
+Real-time atlas inspection and management:
 
-### Profiler
+- **Atlases Tab**: View all active atlases with statistics (size, fill ratio, entry count, memory usage)
+- **Renderers Tab**: See all atlas renderers in the scene and their bound entries
+- **Statistics Tab**: Global memory and performance statistics across all atlases
+- **Tools Tab**: Create/manage atlases, repack, and bulk operations
+- **Textures Tab**: Browse all entries in selected atlas with UV coordinates
+
+**Key Features**:
+- 🔍 Live preview of atlas texture with entry highlighting
+- ➕ Drag-and-drop textures to add to atlas
+- 💾 Export atlases as PNG files
+- 🔄 Repack atlases to reclaim fragmented space
+- 📊 Real-time statistics with auto-refresh
+
+**Important**: Atlases created with `AtlasPacker.GetOrCreate()` or `AtlasPacker.Pack()` will automatically appear in the Debug Window. Direct instantiation with `new RuntimeAtlas()` won't be tracked.
+
+### Profiler Window
 **Window > Runtime Atlas Packer > Profiler**
 
 - Track all atlas operations (add, remove, resize, repack)
@@ -405,7 +435,23 @@ Access via Edit > Preferences > Runtime Atlas Packer:
 - Mathematics 1.2.6+
 - Burst 1.6.0+ (optional, for improved performance)
 
-## Troubleshooting
+## 🐛 Troubleshooting
+
+### Atlas Not Visible in Debug Window
+
+If your atlases don't appear in the Atlas Debug Window:
+
+**Solution**: Use `AtlasPacker.GetOrCreate()` or `AtlasPacker.Pack()` instead of creating atlases directly with `new RuntimeAtlas()`.
+
+```csharp
+// ✅ Good - Atlas will be visible in Debug Window
+var atlas = AtlasPacker.GetOrCreate("MyAtlas", settings);
+
+// ❌ Not recommended - Won't appear in Debug Window
+var atlas = new RuntimeAtlas(settings);
+```
+
+The Debug Window tracks atlases registered through the `AtlasPacker` static API.
 
 ### Burst Compilation Errors
 
@@ -420,7 +466,8 @@ If you encounter errors like `"Burst failed to compile the function pointer"` du
 - **Textures not packing**: Ensure textures are marked as readable in import settings
 - **Poor packing efficiency**: Use `AtlasBatchProcessor.AnalyzeBatch()` for optimization recommendations
 - **Atlas too large**: Adjust `InitialSize` and `MaxSize` in atlas settings
+- **Icon loading errors**: Package is compatible with Unity 2021.3+, some editor icons may vary by version
 
-## License
+## 📝 License
 
-MIT License - Free for commercial and personal use.
+MIT License - Free for commercial and personal use. See [LICENSE.md](LICENSE.md) for details.

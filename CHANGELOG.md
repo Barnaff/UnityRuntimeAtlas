@@ -2,6 +2,20 @@
 
 All notable changes to this project will be documented in this file.
 
+The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
+and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
+
+## [1.0.2] - 2025-12-22
+
+### Fixed
+- Fixed atlas not appearing in Atlas Debug Window when created directly
+- Fixed icon loading error: replaced 'd_MemoryProfiler' with 'd_Profiler.Memory' for Unity version compatibility
+- SimpleNamedAtlasExample now uses `AtlasPacker.GetOrCreate()` to properly register atlases with the debugger
+
+### Changed
+- Sample atlases are now registered with AtlasPacker for better debugging visibility
+- Improved Atlas Debug Window compatibility across Unity versions
+
 ## [1.0.1] - 2024-12-21
 
 ### Fixed
@@ -37,10 +51,12 @@ All notable changes to this project will be documented in this file.
 - Auto-growth when atlas is full
 - GPU-accelerated texture blitting
 - Burst-compiled batch packing jobs
-- AtlasSprite component for SpriteRenderer
-- AtlasMaterial component for custom shaders
+- AtlasSpriteRenderer component for SpriteRenderer integration
+- AtlasImage and AtlasRawImage components for UI integration
 - Extension methods for easy integration
 - Static AtlasPacker API for quick usage
 - Named atlas management
 - AtlasBatchProcessor for high-performance operations
+- Atlas Debug Window for runtime inspection and debugging
 - Comprehensive documentation and examples
+- MIT License

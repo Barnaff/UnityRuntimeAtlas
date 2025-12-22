@@ -1002,7 +1002,7 @@ namespace RuntimeAtlasPacker.Editor
             DrawStatCard("Atlases", _globalStats.TotalAtlases.ToString(), EditorGUIUtility.IconContent("d_PreTextureMipMapHigh"));
             DrawStatCard("Entries", _globalStats.TotalEntries.ToString(), EditorGUIUtility.IconContent("d_RectTool"));
             DrawStatCard("Renderers", $"{_globalStats.ActiveRenderers}/{_globalStats.TotalRenderers}", EditorGUIUtility.IconContent("d_SpriteRenderer Icon"));
-            DrawStatCard("Memory", FormatBytes(_globalStats.TotalMemoryBytes), EditorGUIUtility.IconContent("d_MemoryProfiler"));
+            DrawStatCard("Memory", FormatBytes(_globalStats.TotalMemoryBytes), EditorGUIUtility.IconContent("d_Profiler.Memory"));
             EditorGUILayout.EndHorizontal();
             
             EditorGUILayout.Space(20);

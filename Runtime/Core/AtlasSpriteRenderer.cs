@@ -143,7 +143,9 @@ namespace RuntimeAtlasPacker
                 }
                 else
                 {
+#if UNITY_EDITOR
                     Debug.LogWarning($"[AtlasSpriteRenderer] Failed to pack texture '{texture.name}': {result}");
+#endif
                     ClearSprite();
                 }
             }

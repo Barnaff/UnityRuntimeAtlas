@@ -30,7 +30,9 @@ namespace RuntimeAtlasPacker
             }
             catch (Exception ex)
             {
+#if UNITY_EDITOR
                 Debug.LogWarning($"AtlasBatchProcessor: Job-based packing failed ({ex.Message}), falling back to sequential processing");
+#endif
                 return atlas.AddBatch(textures);
             }
         }
@@ -266,7 +268,9 @@ namespace RuntimeAtlasPacker
 
         /// <summary>
         /// Analyze a batch of textures and return packing statistics.
+        /// Only available in Unity Editor.
         /// </summary>
+#if UNITY_EDITOR
         public static PackingStats AnalyzeBatch(Texture2D[] textures, int atlasSize, int padding = 2)
         {
             var stats = new PackingStats();
@@ -295,6 +299,7 @@ namespace RuntimeAtlasPacker
 
             return stats;
         }
+#endif
     }
 
     /// <summary>

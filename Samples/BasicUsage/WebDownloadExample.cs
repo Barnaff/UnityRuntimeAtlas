@@ -362,7 +362,7 @@ namespace RuntimeAtlasPacker.Samples
             int variation = UnityEngine.Random.Range(-50, 51);
             int size = Mathf.Clamp(imageSize + variation, 128, 512);
             var guid = Guid.NewGuid().ToString();
-            return $"https://api.images.cat/{size}/{size}?random={guid}";
+            return $"https://api.images.cat/{size}/{size}/{guid}";
         }
 
         private async Task<Texture2D> DownloadImageAsync(string url, CancellationToken ct)

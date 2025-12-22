@@ -1,21 +1,29 @@
 {
-  "name": "com.gamedev.runtimeatlaspacker",
-  "version": "1.0.1",
+  "name": "com.kobic.runtimeatlaspacker",
+  "version": "1.0.0",
   "displayName": "Runtime Atlas Packer",
-  "description": "High-performance runtime texture atlas packing with dynamic updates and zero-allocation design",
+  "description": "High-performance runtime texture atlas packing with dynamic updates, Burst compilation, and zero-allocation design. Perfect for dynamic sprite atlasing at runtime.",
   "unity": "2021.3",
-  "documentationUrl": "https://github.com/your-repo/runtime-atlas-packer",
+  "license": "MIT",
+  "documentationUrl": "https://github.com/Barnaff/UnityRuntimeAtlas/#readme",
+  "changelogUrl": "https://github.com/Barnaff/UnityRuntimeAtlas/blob/main/CHANGELOG.md",
+  "licensesUrl": "https://github.com/Barnaff/UnityRuntimeAtlas/blob/main/LICENSE.md",
   "keywords": [
     "atlas",
     "texture",
     "packing",
     "sprite",
     "runtime",
-    "optimization"
+    "optimization",
+    "burst",
+    "performance",
+    "ui",
+    "dynamic"
   ],
   "author": {
-    "name": "GameDev",
-    "email": "dev@example.com"
+    "name": "Kobi Chariski",
+    "email": "kobic@gmail.com",
+    "url": "https://github.com/Barnaff/"
   },
   "dependencies": {
     "com.unity.collections": "1.4.0",
@@ -24,9 +32,9 @@
   },
   "samples": [
     {
-      "displayName": "Basic Usage",
-      "description": "Examples showing basic and advanced atlas usage patterns",
-      "path": "Samples~/BasicUsage"
+      "displayName": "Basic Usage Examples",
+      "description": "Complete examples showing basic atlas usage, named atlases, async operations, and UI integration with SpriteRenderer, UI Image, and RawImage components",
+      "path": "Samples/BasicUsage"
     }
   ]
 }
