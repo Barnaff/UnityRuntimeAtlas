@@ -36,5 +36,9 @@
       "description": "Complete examples showing basic atlas usage, named atlases, async operations, and UI integration with SpriteRenderer, UI Image, and RawImage components",
       "path": "Samples/BasicUsage"
     }
-  ]
+  ],
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/Barnaff/UnityRuntimeAtlas.git"
+  }
 }
