@@ -33,7 +33,9 @@ namespace RuntimeAtlasPacker
         public Texture2D GetTexture(int pageIndex)
         {
             if (_textures == null || pageIndex < 0 || pageIndex >= _textures.Count)
+            {
                 return null;
+            }
             return _textures[pageIndex];
         }
 
@@ -57,8 +59,11 @@ namespace RuntimeAtlasPacker
         {
             get
             {
-                if (_packers == null || _packers.Count == 0) return 0f;
-                float sum = 0f;
+                if (_packers == null || _packers.Count == 0)
+                {
+                    return 0f;
+                }
+                var sum = 0f;
                 foreach (var packer in _packers)
                 {
                     sum += packer?.GetFillRatio() ?? 0f;
@@ -106,7 +111,7 @@ namespace RuntimeAtlasPacker
 
         private void CreateNewPage()
         {
-            int pageIndex = _textures.Count;
+            var pageIndex = _textures.Count;
             
             // Create packer for this page
             IPackingAlgorithm packer = _settings.Algorithm switch
@@ -204,16 +209,20 @@ namespace RuntimeAtlasPacker
 #if UNITY_EDITOR || DEVELOPMENT_BUILD
             // Skip validation for large atlases in non-editor builds for performance
             if (_entries.Count > 100 && !Application.isEditor)
+            {
                 return;
+            }
                 
             var entries = _entries.Values.ToArray();
-            for (int i = 0; i < entries.Length; i++)
+            for (var i = 0; i < entries.Length; i++)
             {
-                for (int j = i + 1; j < entries.Length; j++)
+                for (var j = i + 1; j < entries.Length; j++)
                 {
                     // Only check entries on the same page
                     if (entries[i].TextureIndex != entries[j].TextureIndex)
+                    {
                         continue;
+                    }
                         
                     var rect1 = entries[i].Rect;
                     var rect2 = entries[j].Rect;
@@ -256,15 +265,15 @@ namespace RuntimeAtlasPacker
 
             // Sort by area descending for better packing
             var sorted = new (int index, Texture2D tex, int area)[textures.Length];
-            for (int i = 0; i < textures.Length; i++)
+            for (var i = 0; i < textures.Length; i++)
             {
                 sorted[i] = (i, textures[i], textures[i].width * textures[i].height);
             }
             Array.Sort(sorted, (a, b) => b.area.CompareTo(a.area));
 
             // Pack all textures WITHOUT applying after each one
-            int successCount = 0;
-            int failCount = 0;
+            var successCount = 0;
+            var failCount = 0;
             foreach (var (index, tex, _) in sorted)
             {
                 var (result, entry) = AddInternal(tex);
@@ -331,8 +340,8 @@ namespace RuntimeAtlasPacker
             Debug.Log($"[RuntimeAtlas.AddInternal] Texture size: {texture.width}x{texture.height}");
             Debug.Log($"[RuntimeAtlas.AddInternal] Padding: {_settings.Padding}");
 
-            int width = texture.width + _settings.Padding * 2;
-            int height = texture.height + _settings.Padding * 2;
+            var width = texture.width + _settings.Padding * 2;
+            var height = texture.height + _settings.Padding * 2;
 
             // Check if texture is too large to ever fit
             if (texture.width > _settings.MaxSize || texture.height > _settings.MaxSize)
@@ -346,17 +355,20 @@ namespace RuntimeAtlasPacker
             Debug.Log($"[RuntimeAtlas.AddInternal] Current entries: {_entries.Count}");
 
             // Try to pack in current page first
-            int pageIndex = _currentPageIndex;
-            bool packed = TryPackInPage(pageIndex, width, height, out var packedRect);
+            var pageIndex = _currentPageIndex;
+            var packed = TryPackInPage(pageIndex, width, height, out var packedRect);
             
             if (!packed)
             {
                 Debug.Log($"[RuntimeAtlas.AddInternal] Current page {pageIndex} is full.");
                 
                 // Try all existing pages before creating a new one
-                for (int i = 0; i < _textures.Count; i++)
+                for (var i = 0; i < _textures.Count; i++)
                 {
-                    if (i == pageIndex) continue; // Already tried current page
+                    if (i == pageIndex)
+                    {
+                        continue; // Already tried current page
+                    }
                     
                     if (TryPackInPage(i, width, height, out packedRect))
                     {
@@ -371,7 +383,7 @@ namespace RuntimeAtlasPacker
                 if (!packed)
                 {
                     // Check if we can create more pages
-                    bool canCreatePage = _settings.MaxPageCount == -1 || _textures.Count < _settings.MaxPageCount;
+                    var canCreatePage = _settings.MaxPageCount == -1 || _textures.Count < _settings.MaxPageCount;
                     
                     if (!canCreatePage)
                     {
@@ -432,7 +444,7 @@ namespace RuntimeAtlasPacker
             Debug.Log($"[RuntimeAtlas.AddInternal] UV calculated: ({uvRect.x:F4}, {uvRect.y:F4}, {uvRect.width:F4}, {uvRect.height:F4})");
 
             // Create entry with texture index
-            int id = GetNextId();
+            var id = GetNextId();
             var entry = new AtlasEntry(this, id, pageIndex, contentRect, uvRect, texture.name);
             _entries[id] = entry;
             
@@ -454,7 +466,9 @@ namespace RuntimeAtlasPacker
         {
             packedRect = default;
             if (pageIndex < 0 || pageIndex >= _packers.Count)
+            {
                 return false;
+            }
 
             var packer = _packers[pageIndex];
             var texture = _textures[pageIndex];
@@ -471,17 +485,19 @@ namespace RuntimeAtlasPacker
                 return false; // Can't grow, page is full
             }
 
-            int currentSize = texture.width;
+            var currentSize = texture.width;
             while (currentSize < _settings.MaxSize)
             {
-                int newSize = _settings.GrowthStrategy == GrowthStrategy.Double 
+                var newSize = _settings.GrowthStrategy == GrowthStrategy.Double 
                     ? currentSize * 2 
                     : currentSize + currentSize / 2;
                     
                 newSize = Mathf.Min(newSize, _settings.MaxSize);
                 
                 if (newSize == currentSize)
+                {
                     break; // Already at max size
+                }
 
                 Debug.Log($"[RuntimeAtlas] Attempting to grow page {pageIndex} from {currentSize} to {newSize}");
                 
@@ -502,10 +518,12 @@ namespace RuntimeAtlasPacker
         private bool TryGrowPage(int pageIndex, int newSize)
         {
             if (pageIndex < 0 || pageIndex >= _textures.Count)
+            {
                 return false;
+            }
 
             var oldTexture = _textures[pageIndex];
-            int oldSize = oldTexture.width;
+            var oldSize = oldTexture.width;
             
             if (newSize <= oldSize || newSize > _settings.MaxSize)
             {
@@ -566,8 +584,14 @@ namespace RuntimeAtlasPacker
         /// </summary>
         public bool Remove(AtlasEntry entry)
         {
-            if (_isDisposed) return false;
-            if (entry == null || entry.Atlas != this) return false;
+            if (_isDisposed)
+            {
+                return false;
+            }
+            if (entry == null || entry.Atlas != this)
+            {
+                return false;
+            }
 
             return RemoveById(entry.Id);
         }
@@ -578,7 +602,9 @@ namespace RuntimeAtlasPacker
         public bool RemoveById(int id)
         {
             if (!_entries.TryGetValue(id, out var entry))
+            {
                 return false;
+            }
 
             var profiler = RuntimeAtlasProfiler.Begin("Remove", GetAtlasName(), $"Entry ID: {id}");
 
@@ -617,7 +643,10 @@ namespace RuntimeAtlasPacker
         /// <summary>
         /// Check if an entry exists in the atlas.
         /// </summary>
-        public bool ContainsEntry(int id) => _entries.ContainsKey(id);
+        public bool ContainsEntry(int id)
+        {
+            return _entries.ContainsKey(id);
+        }
 
         /// <summary>
         /// Get an entry by ID.
@@ -630,7 +659,10 @@ namespace RuntimeAtlasPacker
         /// <summary>
         /// Get all entries in the atlas.
         /// </summary>
-        public IEnumerable<AtlasEntry> GetAllEntries() => _entries.Values;
+        public IEnumerable<AtlasEntry> GetAllEntries()
+        {
+            return _entries.Values;
+        }
 
         /// <summary>
         /// Force a full repack of the atlas.
@@ -638,13 +670,19 @@ namespace RuntimeAtlasPacker
         /// </summary>
         public void Repack()
         {
-            if (_isDisposed) throw new ObjectDisposedException(nameof(RuntimeAtlas));
-            if (_entries.Count == 0) return;
+            if (_isDisposed)
+            {
+                throw new ObjectDisposedException(nameof(RuntimeAtlas));
+            }
+            if (_entries.Count == 0)
+            {
+                return;
+            }
 
             Debug.Log("[RuntimeAtlas] Starting full repack...");
 
             // Repack each page individually
-            for (int pageIndex = 0; pageIndex < _textures.Count; pageIndex++)
+            for (var pageIndex = 0; pageIndex < _textures.Count; pageIndex++)
             {
                 RepackPage(pageIndex);
             }
@@ -656,7 +694,10 @@ namespace RuntimeAtlasPacker
 
         private void RepackPage(int pageIndex)
         {
-            if (pageIndex < 0 || pageIndex >= _textures.Count) return;
+            if (pageIndex < 0 || pageIndex >= _textures.Count)
+            {
+                return;
+            }
 
             var texture = _textures[pageIndex];
             var packer = _packers[pageIndex];
@@ -673,7 +714,10 @@ namespace RuntimeAtlasPacker
                 }
             }
 
-            if (pageEntries.Count == 0) return;
+            if (pageEntries.Count == 0)
+            {
+                return;
+            }
 
             Debug.Log($"[RuntimeAtlas] Repacking page {pageIndex} with {pageEntries.Count} entries...");
 
@@ -689,8 +733,8 @@ namespace RuntimeAtlasPacker
             // Re-pack
             foreach (var (entry, tex) in pageEntries)
             {
-                int width = tex.width + _settings.Padding * 2;
-                int height = tex.height + _settings.Padding * 2;
+                var width = tex.width + _settings.Padding * 2;
+                var height = tex.height + _settings.Padding * 2;
 
                 if (packer.TryPack(width, height, out var packedRect))
                 {
@@ -722,16 +766,22 @@ namespace RuntimeAtlasPacker
 
                 // Cleanup temp texture
                 if (Application.isPlaying)
+                {
                     UnityEngine.Object.Destroy(tex);
+                }
                 else
+                {
                     UnityEngine.Object.DestroyImmediate(tex);
+                }
             }
         }
 
         private int GetNextId()
         {
             if (_recycledIds.Count > 0)
+            {
                 return _recycledIds.Dequeue();
+            }
             return _nextId++;
         }
 
@@ -746,7 +796,10 @@ namespace RuntimeAtlasPacker
         /// </summary>
         public void Apply()
         {
-            if (!_isDirty) return;
+            if (!_isDirty)
+            {
+                return;
+            }
             try
             {
                 foreach (var texture in _textures)
@@ -763,7 +816,10 @@ namespace RuntimeAtlasPacker
 
         public void Dispose()
         {
-            if (_isDisposed) return;
+            if (_isDisposed)
+            {
+                return;
+            }
             _isDisposed = true;
 
             foreach (var entry in _entries.Values)
@@ -790,9 +846,13 @@ namespace RuntimeAtlasPacker
                     if (texture != null)
                     {
                         if (Application.isPlaying)
+                        {
                             UnityEngine.Object.Destroy(texture);
+                        }
                         else
+                        {
                             UnityEngine.Object.DestroyImmediate(texture);
+                        }
                     }
                 }
                 _textures.Clear();

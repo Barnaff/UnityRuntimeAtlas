@@ -124,7 +124,9 @@ namespace RuntimeAtlasPacker
             get
             {
                 if (_entry != null && _entry.IsValid)
+                {
                     return _entry.Texture;
+                }
                 return s_WhiteTexture;
             }
         }
@@ -134,7 +136,10 @@ namespace RuntimeAtlasPacker
         /// </summary>
         public AtlasImage SetEntry(AtlasEntry entry)
         {
-            if (_entry == entry) return this;
+            if (_entry == entry)
+            {
+                return this;
+            }
 
             Unbind();
 
@@ -218,6 +223,30 @@ namespace RuntimeAtlasPacker
 
         /// <summary>
         /// Pack and set a texture asynchronously.
+        /// </summary>
+        public async Task<AtlasImage> SetTextureAsync(Texture2D texture)
+        {
+            if (texture == null)
+            {
+                SetEntry(null);
+                return this;
+            }
+
+            var atlas = string.IsNullOrEmpty(_targetAtlasName)
+                ? AtlasPacker.Default
+                : AtlasPacker.GetOrCreate(_targetAtlasName);
+
+            // Note: AddAsync was removed, using synchronous Add instead
+            // For true async, we would need to wrap this in Task.Run but Unity API calls must be on main thread
+            var (result, entry) = atlas.Add(texture);
+
+            if (!_isDestroyed && result == AddResult.Success)
+            {
+                SetEntry(entry);
+            }
+
+            return this;
+        }
 
         /// <summary>
         /// Clear the current image.
@@ -334,7 +363,9 @@ namespace RuntimeAtlasPacker
             }
 
             if (_lastEntryVersion == _entry.Version && _managedSprite != null)
+            {
                 return;
+            }
 
             ClearManagedSprite();
             _managedSprite = _entry.CreateSprite(_pixelsPerUnit);
@@ -351,9 +382,13 @@ namespace RuntimeAtlasPacker
             if (_managedSprite != null)
             {
                 if (Application.isPlaying)
+                {
                     Destroy(_managedSprite);
+                }
                 else
+                {
                     DestroyImmediate(_managedSprite);
+                }
                 _managedSprite = null;
             }
         }
@@ -384,9 +419,13 @@ namespace RuntimeAtlasPacker
                     break;
                 case ImageType.Sliced:
                     if (_managedSprite != null && _managedSprite.border.sqrMagnitude > 0)
+                    {
                         GenerateSlicedSprite(vh, rect, uv, color32);
+                    }
                     else
+                    {
                         GenerateSimpleSprite(vh, rect, uv, color32);
+                    }
                     break;
                 case ImageType.Tiled:
                     GenerateTiledSprite(vh, rect, uv, color32);
@@ -399,18 +438,18 @@ namespace RuntimeAtlasPacker
 
         private void PreserveAspectRatio(ref Rect rect)
         {
-            float spriteRatio = (float)_entry.Width / _entry.Height;
-            float rectRatio = rect.width / rect.height;
+            var spriteRatio = (float)_entry.Width / _entry.Height;
+            var rectRatio = rect.width / rect.height;
 
             if (spriteRatio > rectRatio)
             {
-                float newHeight = rect.width / spriteRatio;
+                var newHeight = rect.width / spriteRatio;
                 rect.y += (rect.height - newHeight) * 0.5f;
                 rect.height = newHeight;
             }
             else
             {
-                float newWidth = rect.height * spriteRatio;
+                var newWidth = rect.height * spriteRatio;
                 rect.x += (rect.width - newWidth) * 0.5f;
                 rect.width = newWidth;
             }
@@ -429,22 +468,25 @@ namespace RuntimeAtlasPacker
 
         private void GenerateSlicedSprite(VertexHelper vh, Rect rect, Rect uv, Color32 color32)
         {
-            if (_managedSprite == null) return;
+            if (_managedSprite == null)
+            {
+                return;
+            }
 
             var border = _managedSprite.border;
             var atlasSize = new Vector2(_entry.Atlas.Width, _entry.Atlas.Height);
 
             // Convert border from pixels to UV space
-            float leftBorderUV = border.x / atlasSize.x;
-            float rightBorderUV = border.z / atlasSize.x;
-            float bottomBorderUV = border.y / atlasSize.y;
-            float topBorderUV = border.w / atlasSize.y;
+            var leftBorderUV = border.x / atlasSize.x;
+            var rightBorderUV = border.z / atlasSize.x;
+            var bottomBorderUV = border.y / atlasSize.y;
+            var topBorderUV = border.w / atlasSize.y;
 
             // Calculate positions
-            float[] xPos = new float[4];
-            float[] yPos = new float[4];
-            float[] xUV = new float[4];
-            float[] yUV = new float[4];
+            var xPos = new float[4];
+            var yPos = new float[4];
+            var xUV = new float[4];
+            var yUV = new float[4];
 
             xPos[0] = rect.xMin;
             xPos[1] = rect.xMin + border.x;
@@ -467,14 +509,16 @@ namespace RuntimeAtlasPacker
             yUV[3] = uv.yMax;
 
             // Generate 9-slice quads
-            for (int y = 0; y < 3; y++)
+            for (var y = 0; y < 3; y++)
             {
-                for (int x = 0; x < 3; x++)
+                for (var x = 0; x < 3; x++)
                 {
                     if (!_fillCenter && x == 1 && y == 1)
+                    {
                         continue;
+                    }
 
-                    int vertIndex = vh.currentVertCount;
+                    var vertIndex = vh.currentVertCount;
 
                     vh.AddVert(new Vector3(xPos[x], yPos[y]), color32, new Vector2(xUV[x], yUV[y]));
                     vh.AddVert(new Vector3(xPos[x], yPos[y + 1]), color32, new Vector2(xUV[x], yUV[y + 1]));
@@ -495,34 +539,34 @@ namespace RuntimeAtlasPacker
                 return;
             }
 
-            float tileWidth = _entry.Width / _pixelsPerUnit;
-            float tileHeight = _entry.Height / _pixelsPerUnit;
+            var tileWidth = _entry.Width / _pixelsPerUnit;
+            var tileHeight = _entry.Height / _pixelsPerUnit;
 
-            int xTiles = Mathf.CeilToInt(rect.width / tileWidth);
-            int yTiles = Mathf.CeilToInt(rect.height / tileHeight);
+            var xTiles = Mathf.CeilToInt(rect.width / tileWidth);
+            var yTiles = Mathf.CeilToInt(rect.height / tileHeight);
 
             // Limit tiles to prevent performance issues
             xTiles = Mathf.Min(xTiles, 100);
             yTiles = Mathf.Min(yTiles, 100);
 
-            for (int y = 0; y < yTiles; y++)
+            for (var y = 0; y < yTiles; y++)
             {
-                for (int x = 0; x < xTiles; x++)
+                for (var x = 0; x < xTiles; x++)
                 {
-                    float x0 = rect.xMin + x * tileWidth;
-                    float y0 = rect.yMin + y * tileHeight;
-                    float x1 = Mathf.Min(x0 + tileWidth, rect.xMax);
-                    float y1 = Mathf.Min(y0 + tileHeight, rect.yMax);
+                    var x0 = rect.xMin + x * tileWidth;
+                    var y0 = rect.yMin + y * tileHeight;
+                    var x1 = Mathf.Min(x0 + tileWidth, rect.xMax);
+                    var y1 = Mathf.Min(y0 + tileHeight, rect.yMax);
 
-                    float uvWidth = (x1 - x0) / tileWidth;
-                    float uvHeight = (y1 - y0) / tileHeight;
+                    var uvWidth = (x1 - x0) / tileWidth;
+                    var uvHeight = (y1 - y0) / tileHeight;
 
-                    float u0 = uv.xMin;
-                    float v0 = uv.yMin;
-                    float u1 = uv.xMin + uv.width * uvWidth;
-                    float v1 = uv.yMin + uv.height * uvHeight;
+                    var u0 = uv.xMin;
+                    var v0 = uv.yMin;
+                    var u1 = uv.xMin + uv.width * uvWidth;
+                    var v1 = uv.yMin + uv.height * uvHeight;
 
-                    int vertIndex = vh.currentVertCount;
+                    var vertIndex = vh.currentVertCount;
 
                     vh.AddVert(new Vector3(x0, y0), color32, new Vector2(u0, v0));
                     vh.AddVert(new Vector3(x0, y1), color32, new Vector2(u0, v1));
@@ -540,7 +584,10 @@ namespace RuntimeAtlasPacker
         /// </summary>
         public override void SetNativeSize()
         {
-            if (_entry == null || !_entry.IsValid) return;
+            if (_entry == null || !_entry.IsValid)
+            {
+                return;
+            }
 
             rectTransform.sizeDelta = new Vector2(_entry.Width, _entry.Height);
         }

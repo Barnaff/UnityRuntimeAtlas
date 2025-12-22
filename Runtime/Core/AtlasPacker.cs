@@ -65,7 +65,9 @@ namespace RuntimeAtlasPacker
                 // Try default atlas first
                 var (result, entry) = Default.Add(texture);
                 if (result == AddResult.Success)
+                {
                     return entry;
+                }
 
                 // Check if texture is too large or invalid
                 if (result == AddResult.TooLarge)
@@ -84,10 +86,10 @@ namespace RuntimeAtlasPacker
                 Debug.Log("[AtlasPacker] Default atlas is full, checking overflow atlases...");
 
                 // Try existing overflow atlases
-                int overflowIndex = 1;
+                var overflowIndex = 1;
                 while (true)
                 {
-                    string overflowName = $"[Default_Overflow_{overflowIndex}]";
+                    var overflowName = $"[Default_Overflow_{overflowIndex}]";
                     
                     if (_namedAtlases.TryGetValue(overflowName, out var overflowAtlas))
                     {
@@ -130,7 +132,9 @@ namespace RuntimeAtlasPacker
         public static AtlasEntry[] PackBatch(params Texture2D[] textures)
         {
             if (textures == null || textures.Length == 0)
+            {
                 return Array.Empty<AtlasEntry>();
+            }
 
             lock (_lock)
             {
@@ -143,7 +147,7 @@ namespace RuntimeAtlasPacker
                     var failedTextures = new List<Texture2D>();
                     var successIds = new HashSet<int>(entries.Select(e => Array.IndexOf(textures, e.Name)));
                     
-                    for (int i = 0; i < textures.Length; i++)
+                    for (var i = 0; i < textures.Length; i++)
                     {
                         if (!successIds.Contains(i))
                         {
@@ -156,10 +160,10 @@ namespace RuntimeAtlasPacker
                         Debug.Log($"[AtlasPacker] Default atlas couldn't fit {failedTextures.Count} textures, trying overflow atlases...");
                         
                         // Try overflow atlases
-                        int overflowIndex = 1;
+                        var overflowIndex = 1;
                         while (failedTextures.Count > 0)
                         {
-                            string overflowName = $"[Default_Overflow_{overflowIndex}]";
+                            var overflowName = $"[Default_Overflow_{overflowIndex}]";
                             RuntimeAtlas overflowAtlas;
                             
                             if (_namedAtlases.TryGetValue(overflowName, out overflowAtlas))

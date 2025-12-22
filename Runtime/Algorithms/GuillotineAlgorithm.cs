@@ -37,22 +37,24 @@ namespace RuntimeAtlasPacker
         {
             result = default;
             if (width <= 0 || height <= 0 || width > _width || height > _height)
+            {
                 return false;
+            }
 
             // Find best free rectangle using Best Area Fit (BAF) heuristic
-            int bestRectIndex = -1;
-            int bestAreaFit = int.MaxValue;
-            int bestShortSideFit = int.MaxValue;
+            var bestRectIndex = -1;
+            var bestAreaFit = int.MaxValue;
+            var bestShortSideFit = int.MaxValue;
 
-            for (int i = 0; i < _freeRects.Count; i++)
+            for (var i = 0; i < _freeRects.Count; i++)
             {
-                RectInt freeRect = _freeRects[i];
+                var freeRect = _freeRects[i];
                 
                 // Check if it fits
                 if (width <= freeRect.width && height <= freeRect.height)
                 {
-                    int areaFit = freeRect.width * freeRect.height - width * height;
-                    int shortSideFit = Math.Min(freeRect.width - width, freeRect.height - height);
+                    var areaFit = freeRect.width * freeRect.height - width * height;
+                    var shortSideFit = Math.Min(freeRect.width - width, freeRect.height - height);
 
                     if (areaFit < bestAreaFit || (areaFit == bestAreaFit && shortSideFit < bestShortSideFit))
                     {
@@ -64,17 +66,19 @@ namespace RuntimeAtlasPacker
             }
 
             if (bestRectIndex == -1)
+            {
                 return false;
+            }
 
             // Place the rectangle
-            RectInt freeNode = _freeRects[bestRectIndex];
+            var freeNode = _freeRects[bestRectIndex];
             result = new RectInt(freeNode.x, freeNode.y, width, height);
             _usedArea += (long)width * height;
 
             // Split the remaining area
             // Split along the shorter axis (MIN heuristic)
-            int w = freeNode.width - width;
-            int h = freeNode.height - height;
+            var w = freeNode.width - width;
+            var h = freeNode.height - height;
 
             // Remove the used node
             _freeRects.RemoveAt(bestRectIndex);
@@ -83,14 +87,26 @@ namespace RuntimeAtlasPacker
             if (w <= h)
             {
                 // Split vertically
-                if (w > 0) _freeRects.Add(new RectInt(freeNode.x + width, freeNode.y, w, height));
-                if (h > 0) _freeRects.Add(new RectInt(freeNode.x, freeNode.y + height, freeNode.width, h));
+                if (w > 0)
+                {
+                    _freeRects.Add(new RectInt(freeNode.x + width, freeNode.y, w, height));
+                }
+                if (h > 0)
+                {
+                    _freeRects.Add(new RectInt(freeNode.x, freeNode.y + height, freeNode.width, h));
+                }
             }
             else
             {
                 // Split horizontally
-                if (w > 0) _freeRects.Add(new RectInt(freeNode.x + width, freeNode.y, w, freeNode.height));
-                if (h > 0) _freeRects.Add(new RectInt(freeNode.x, freeNode.y + height, width, h));
+                if (w > 0)
+                {
+                    _freeRects.Add(new RectInt(freeNode.x + width, freeNode.y, w, freeNode.height));
+                }
+                if (h > 0)
+                {
+                    _freeRects.Add(new RectInt(freeNode.x, freeNode.y + height, width, h));
+                }
             }
 
             // Merge free rectangles if possible (optional optimization)
@@ -133,13 +149,19 @@ namespace RuntimeAtlasPacker
 
         public float GetFillRatio()
         {
-            if (_width == 0 || _height == 0) return 0f;
+            if (_width == 0 || _height == 0)
+            {
+                return 0f;
+            }
             return (float)_usedArea / (_width * _height);
         }
 
         public void Dispose()
         {
-            if (_isDisposed) return;
+            if (_isDisposed)
+            {
+                return;
+            }
             _isDisposed = true;
             _freeRects.Clear();
             _freeRects = null;

@@ -33,7 +33,9 @@ namespace RuntimeAtlasPacker
         private void Awake()
         {
             if (_targetRenderer == null)
+            {
                 _targetRenderer = GetComponent<Renderer>();
+            }
 
             _propertyBlock = new MaterialPropertyBlock();
             _texturePropertyId = Shader.PropertyToID(_texturePropertyName);
@@ -94,10 +96,14 @@ namespace RuntimeAtlasPacker
         private void UpdateMaterial()
         {
             if (_entry == null || !_entry.IsValid || _targetRenderer == null)
+            {
                 return;
+            }
 
             if (_lastVersion == _entry.Version)
+            {
                 return;
+            }
 
             var uv = _entry.UV;
             var uvST = new Vector4(uv.width, uv.height, uv.x, uv.y);

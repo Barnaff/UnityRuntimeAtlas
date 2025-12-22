@@ -57,14 +57,14 @@ namespace RuntimeAtlasPacker
             }
 
             // Find best position using Best Short Side Fit heuristic
-            int bestScore1 = int.MaxValue;
-            int bestScore2 = int.MaxValue;
-            int bestIndex = -1;
-            int4 bestRect = default;
-            int candidatesChecked = 0;
-            int candidatesSkippedOverlap = 0;
+            var bestScore1 = int.MaxValue;
+            var bestScore2 = int.MaxValue;
+            var bestIndex = -1;
+            var bestRect = default(int4);
+            var candidatesChecked = 0;
+            var candidatesSkippedOverlap = 0;
 
-            for (int i = 0; i < _freeRects.Length; i++)
+            for (var i = 0; i < _freeRects.Length; i++)
             {
                 var freeRect = _freeRects[i];
                 
@@ -83,10 +83,10 @@ namespace RuntimeAtlasPacker
                         continue;
                     }
                     
-                    int leftoverHoriz = math.abs(freeRect.z - width);
-                    int leftoverVert = math.abs(freeRect.w - height);
-                    int shortSideFit = math.min(leftoverHoriz, leftoverVert);
-                    int longSideFit = math.max(leftoverHoriz, leftoverVert);
+                    var leftoverHoriz = math.abs(freeRect.z - width);
+                    var leftoverVert = math.abs(freeRect.w - height);
+                    var shortSideFit = math.min(leftoverHoriz, leftoverVert);
+                    var longSideFit = math.max(leftoverHoriz, leftoverVert);
 
                     if (shortSideFit < bestScore1 || (shortSideFit == bestScore1 && longSideFit < bestScore2))
                     {
@@ -117,10 +117,12 @@ namespace RuntimeAtlasPacker
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
         private bool OverlapsAnyUsedRect(int4 rect)
         {
-            for (int i = 0; i < _usedRects.Length; i++)
+            for (var i = 0; i < _usedRects.Length; i++)
             {
                 if (RectsIntersect(rect, _usedRects[i]))
+                {
                     return true;
+                }
             }
             return false;
         }
@@ -140,12 +142,12 @@ namespace RuntimeAtlasPacker
             var tempNewRects = new NativeList<int4>(16, Allocator.Temp);
             
             // Split overlapping free rectangles
-            for (int i = _freeRects.Length - 1; i >= 0; i--)
+            for (var i = _freeRects.Length - 1; i >= 0; i--)
             {
                 if (SplitFreeRect(_freeRects[i], rect, out var newRects))
                 {
                     // Add new split rects to temporary list
-                    for (int j = 0; j < newRects.Length; j++)
+                    for (var j = 0; j < newRects.Length; j++)
                     {
                         var newRect = newRects[j];
                         // Only add valid rects (positive dimensions)
@@ -162,7 +164,7 @@ namespace RuntimeAtlasPacker
             }
             
             // Add all new rects to free list
-            for (int i = 0; i < tempNewRects.Length; i++)
+            for (var i = 0; i < tempNewRects.Length; i++)
             {
                 _freeRects.Add(tempNewRects[i]);
             }
@@ -178,7 +180,7 @@ namespace RuntimeAtlasPacker
         private bool SplitFreeRect(int4 freeRect, int4 usedRect, out NativeArray<int4> newRects)
         {
             newRects = new NativeArray<int4>(4, Allocator.Temp);
-            int count = 0;
+            var count = 0;
 
             // Check if they don't intersect
             if (usedRect.x >= freeRect.x + freeRect.z || usedRect.x + usedRect.z <= freeRect.x ||
@@ -197,7 +199,7 @@ namespace RuntimeAtlasPacker
             // Right
             if (usedRect.x + usedRect.z < freeRect.x + freeRect.z)
             {
-                int rightX = usedRect.x + usedRect.z;
+                var rightX = usedRect.x + usedRect.z;
                 newRects[count++] = new int4(rightX, freeRect.y, freeRect.x + freeRect.z - rightX, freeRect.w);
             }
 
@@ -261,7 +263,7 @@ namespace RuntimeAtlasPacker
             var r = new int4(rect.x, rect.y, rect.width, rect.height);
             
             // Remove from used
-            for (int i = 0; i < _usedRects.Length; i++)
+            for (var i = 0; i < _usedRects.Length; i++)
             {
                 var used = _usedRects[i];
                 if (used.x == r.x && used.y == r.y && used.z == r.z && used.w == r.w)
@@ -289,10 +291,14 @@ namespace RuntimeAtlasPacker
         public void Resize(int newWidth, int newHeight)
         {
             if (newWidth < _width || newHeight < _height)
+            {
                 throw new ArgumentException("Cannot shrink atlas with existing content");
+            }
 
             if (newWidth == _width && newHeight == _height)
+            {
                 return;
+            }
 
             // Add new free space on the right
             if (newWidth > _width)
@@ -311,7 +317,7 @@ namespace RuntimeAtlasPacker
             {
                 // The corner is already covered by the two rectangles above
                 // But we need to extend the right strip
-                for (int i = 0; i < _freeRects.Length; i++)
+                for (var i = 0; i < _freeRects.Length; i++)
                 {
                     var r = _freeRects[i];
                     if (r.x == _width && r.y == 0)
@@ -338,17 +344,26 @@ namespace RuntimeAtlasPacker
 
         public float GetFillRatio()
         {
-            long totalArea = (long)_width * _height;
+            var totalArea = (long)_width * _height;
             return totalArea > 0 ? (float)_usedArea / totalArea : 0f;
         }
 
         public void Dispose()
         {
-            if (_isDisposed) return;
+            if (_isDisposed)
+            {
+                return;
+            }
             _isDisposed = true;
             
-            if (_freeRects.IsCreated) _freeRects.Dispose();
-            if (_usedRects.IsCreated) _usedRects.Dispose();
+            if (_freeRects.IsCreated)
+            {
+                _freeRects.Dispose();
+            }
+            if (_usedRects.IsCreated)
+            {
+                _usedRects.Dispose();
+            }
         }
     }
 }

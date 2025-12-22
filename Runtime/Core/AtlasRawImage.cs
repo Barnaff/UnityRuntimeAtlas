@@ -31,7 +31,9 @@ namespace RuntimeAtlasPacker
             get
             {
                 if (_rawImage == null)
+                {
                     _rawImage = GetComponent<RawImage>();
+                }
                 return _rawImage;
             }
         }
@@ -71,7 +73,10 @@ namespace RuntimeAtlasPacker
         /// </summary>
         public AtlasRawImage SetEntry(AtlasEntry entry)
         {
-            if (_entry == entry) return this;
+            if (_entry == entry)
+            {
+                return this;
+            }
 
             Unbind();
 
@@ -171,7 +176,10 @@ namespace RuntimeAtlasPacker
         /// </summary>
         public void SetNativeSize()
         {
-            if (_entry == null || !_entry.IsValid) return;
+            if (_entry == null || !_entry.IsValid)
+            {
+                return;
+            }
 
             var rt = GetComponent<RectTransform>();
             if (rt != null)
@@ -261,7 +269,9 @@ namespace RuntimeAtlasPacker
             }
 
             if (_lastEntryVersion == _entry.Version)
+            {
                 return;
+            }
 
             RawImage.texture = _entry.Texture;
             RawImage.uvRect = _entry.UV;
@@ -276,14 +286,20 @@ namespace RuntimeAtlasPacker
 
         private void ApplyAspectRatio()
         {
-            if (_entry == null || _entry.Width == 0 || _entry.Height == 0) return;
+            if (_entry == null || _entry.Width == 0 || _entry.Height == 0)
+            {
+                return;
+            }
 
             var rt = GetComponent<RectTransform>();
-            if (rt == null) return;
+            if (rt == null)
+            {
+                return;
+            }
 
             var parentRect = rt.rect;
-            float spriteRatio = (float)_entry.Width / _entry.Height;
-            float rectRatio = parentRect.width / parentRect.height;
+            var spriteRatio = (float)_entry.Width / _entry.Height;
+            var rectRatio = parentRect.width / parentRect.height;
 
             // This is a simplified version - for full aspect fitting you'd want
             // to use an AspectRatioFitter or implement more complex logic

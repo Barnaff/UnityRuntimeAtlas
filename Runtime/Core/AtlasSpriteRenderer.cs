@@ -30,7 +30,9 @@ namespace RuntimeAtlasPacker
             get
             {
                 if (_renderer == null)
+                {
                     _renderer = GetComponent<SpriteRenderer>();
+                }
                 return _renderer;
             }
         }
@@ -91,7 +93,10 @@ namespace RuntimeAtlasPacker
         /// </summary>
         public AtlasSpriteRenderer SetEntry(AtlasEntry entry)
         {
-            if (_entry == entry) return this;
+            if (_entry == entry)
+            {
+                return this;
+            }
 
             Unbind();
 

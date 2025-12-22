@@ -54,25 +54,27 @@ namespace RuntimeAtlasPacker
             result = default;
             
             if (width <= 0 || height <= 0 || width > _width || height > _height)
+            {
                 return false;
+            }
 
-            int bestIndex = -1;
-            int bestX = 0;
-            int bestY = int.MaxValue;
-            int bestWidth = 0;
-            int bestScore = int.MaxValue;
+            var bestIndex = -1;
+            var bestX = 0;
+            var bestY = int.MaxValue;
+            var bestWidth = 0;
+            var bestScore = int.MaxValue;
 
             // Find the best position using Best-Fit strategy
             // We want to minimize the height increase and wasted space
-            for (int i = 0; i < _skyline.Length; i++)
+            for (var i = 0; i < _skyline.Length; i++)
             {
-                if (TryFit(i, width, height, out int y))
+                if (TryFit(i, width, height, out var y))
                 {
                     // Calculate score: prefer lower Y, then minimize gap
                     // Score = Y + (gap * weight)
                     // This helps fill gaps before growing upwards
                     
-                    int score = y;
+                    var score = y;
                     
                     // Check if this placement fits perfectly in a gap
                     if (y + height < _height)
@@ -96,7 +98,9 @@ namespace RuntimeAtlasPacker
             }
 
             if (bestIndex == -1)
+            {
                 return false;
+            }
 
             // Place the rectangle
             AddSkylineLevel(bestIndex, bestX, bestY, bestWidth, height);
@@ -116,10 +120,12 @@ namespace RuntimeAtlasPacker
             
             // Check if it fits horizontally
             if (node.X + width > _width)
+            {
                 return false;
+            }
 
-            int widthLeft = width;
-            int i = index;
+            var widthLeft = width;
+            var i = index;
             
             // Find the highest point under the rectangle
             while (widthLeft > 0 && i < _skyline.Length)
@@ -129,7 +135,9 @@ namespace RuntimeAtlasPacker
                 
                 // Check if too high
                 if (y + height > _height)
+                {
                     return false;
+                }
 
                 widthLeft -= current.Width;
                 i++;
@@ -137,7 +145,9 @@ namespace RuntimeAtlasPacker
 
             // Check horizontal bounds
             if (widthLeft > 0)
+            {
                 return false;
+            }
 
             return true;
         }
@@ -156,14 +166,14 @@ namespace RuntimeAtlasPacker
             _skyline[index] = newNode;
 
             // Remove nodes that are covered by the new node
-            for (int i = index + 1; i < _skyline.Length; i++)
+            for (var i = index + 1; i < _skyline.Length; i++)
             {
                 var node = _skyline[i];
                 var prev = _skyline[i - 1];
 
                 if (node.X < prev.X + prev.Width)
                 {
-                    int shrink = prev.X + prev.Width - node.X;
+                    var shrink = prev.X + prev.Width - node.X;
 
                     if (shrink >= node.Width)
                     {
@@ -192,7 +202,7 @@ namespace RuntimeAtlasPacker
 
         private void MergeSkyline()
         {
-            for (int i = 0; i < _skyline.Length - 1; i++)
+            for (var i = 0; i < _skyline.Length - 1; i++)
             {
                 var current = _skyline[i];
                 var next = _skyline[i + 1];

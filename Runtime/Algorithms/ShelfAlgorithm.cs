@@ -45,19 +45,21 @@ namespace RuntimeAtlasPacker
         {
             result = default;
             if (width <= 0 || height <= 0 || width > _width || height > _height)
+            {
                 return false;
+            }
 
             // 1. Try to fit in free space from previous shelves (Waste Map)
             // Best Area Fit
-            int bestFreeIndex = -1;
-            int bestAreaFit = int.MaxValue;
+            var bestFreeIndex = -1;
+            var bestAreaFit = int.MaxValue;
 
-            for (int i = 0; i < _freeSpace.Count; i++)
+            for (var i = 0; i < _freeSpace.Count; i++)
             {
-                RectInt free = _freeSpace[i];
+                var free = _freeSpace[i];
                 if (width <= free.width && height <= free.height)
                 {
-                    int areaFit = free.width * free.height - width * height;
+                    var areaFit = free.width * free.height - width * height;
                     if (areaFit < bestAreaFit)
                     {
                         bestAreaFit = areaFit;
@@ -68,7 +70,7 @@ namespace RuntimeAtlasPacker
 
             if (bestFreeIndex != -1)
             {
-                RectInt free = _freeSpace[bestFreeIndex];
+                var free = _freeSpace[bestFreeIndex];
                 result = new RectInt(free.x, free.y, width, height);
                 _usedArea += (long)width * height;
 
@@ -77,10 +79,14 @@ namespace RuntimeAtlasPacker
                 
                 // Split remaining space (Guillotine style split for the waste map)
                 if (free.width > width)
+                {
                     _freeSpace.Add(new RectInt(free.x + width, free.y, free.width - width, height));
+                }
                 
                 if (free.height > height)
+                {
                     _freeSpace.Add(new RectInt(free.x, free.y + height, free.width, free.height - height));
+                }
 
                 return true;
             }
@@ -114,7 +120,7 @@ namespace RuntimeAtlasPacker
                 _freeSpace.Add(new RectInt(_currentX, _currentY, _width - _currentX, _currentShelfHeight));
             }
 
-            int nextY = _currentY + _currentShelfHeight;
+            var nextY = _currentY + _currentShelfHeight;
             
             // Check if we can start a new shelf
             if (nextY + height <= _height)
@@ -160,13 +166,19 @@ namespace RuntimeAtlasPacker
 
         public float GetFillRatio()
         {
-            if (_width == 0 || _height == 0) return 0f;
+            if (_width == 0 || _height == 0)
+            {
+                return 0f;
+            }
             return (float)_usedArea / (_width * _height);
         }
 
         public void Dispose()
         {
-            if (_isDisposed) return;
+            if (_isDisposed)
+            {
+                return;
+            }
             _isDisposed = true;
             _freeSpace.Clear();
             _freeSpace = null;

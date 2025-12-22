@@ -30,7 +30,9 @@ namespace RuntimeAtlasPacker
         private void Awake()
         {
             if (_renderer == null)
+            {
                 _renderer = GetComponent<SpriteRenderer>();
+            }
         }
 
         private void OnDestroy()
@@ -88,7 +90,9 @@ namespace RuntimeAtlasPacker
             }
 
             if (_lastVersion == _entry.Version && _currentSprite != null)
+            {
                 return;
+            }
 
             // Destroy old sprite
             if (_currentSprite != null)

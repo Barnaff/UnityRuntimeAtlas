@@ -16,9 +16,9 @@ namespace RuntimeAtlasPacker
         private string _name;
 
         // Cached values - updated by atlas
-        internal RectInt PixelRect;
-        internal Rect UVRect;
-        internal int Version;
+        internal RectInt _pixelRect;
+        internal Rect _uvRect;
+        internal int _version;
 
         /// <summary>Unique identifier for this entry.</summary>
         public int Id => _id;
@@ -33,22 +33,25 @@ namespace RuntimeAtlasPacker
         public bool IsValid => !_isDisposed && _atlas != null && _atlas.ContainsEntry(_id);
 
         /// <summary>Original width of the sprite in pixels.</summary>
-        public int Width => PixelRect.width;
+        public int Width => _pixelRect.width;
 
         /// <summary>Original height of the sprite in pixels.</summary>
-        public int Height => PixelRect.height;
+        public int Height => _pixelRect.height;
 
         /// <summary>UV coordinates in the atlas (0-1 range).</summary>
-        public Rect UV => UVRect;
+        public Rect UV => _uvRect;
 
         /// <summary>Pixel coordinates in the atlas.</summary>
-        public RectInt Rect => PixelRect;
+        public RectInt Rect => _pixelRect;
 
         /// <summary>The atlas texture for this specific entry (uses TextureIndex).</summary>
         public Texture2D Texture => _atlas?.GetTexture(_textureIndex);
 
         /// <summary>Name of the original texture (if available).</summary>
         public string Name => _name;
+        
+        /// <summary>Version number that increments whenever the UVs change.</summary>
+        public int Version => _version;
 
         /// <summary>Event fired when this entry's UV coordinates change.</summary>
         public event Action<AtlasEntry> OnUVChanged;
@@ -58,17 +61,17 @@ namespace RuntimeAtlasPacker
             _atlas = atlas;
             _id = id;
             _textureIndex = textureIndex;
-            PixelRect = pixelRect;
-            UVRect = uvRect;
-            Version = 0;
+            _pixelRect = pixelRect;
+            _uvRect = uvRect;
+            _version = 0;
             _name = name ?? $"Entry_{id}";
         }
 
         internal void UpdateRect(RectInt newPixelRect, Rect newUVRect)
         {
-            PixelRect = newPixelRect;
-            UVRect = newUVRect;
-            Version++;
+            _pixelRect = newPixelRect;
+            _uvRect = newUVRect;
+            _version++;
             OnUVChanged?.Invoke(this);
         }
 
@@ -82,7 +85,7 @@ namespace RuntimeAtlasPacker
         /// </summary>
         public Vector4 GetUVVector4()
         {
-            return new Vector4(UVRect.x, UVRect.y, UVRect.width, UVRect.height);
+            return new Vector4(_uvRect.x, _uvRect.y, _uvRect.width, _uvRect.height);
         }
 
         /// <summary>
@@ -90,7 +93,7 @@ namespace RuntimeAtlasPacker
         /// </summary>
         public Vector4 GetUVMinMax()
         {
-            return new Vector4(UVRect.xMin, UVRect.yMin, UVRect.xMax, UVRect.yMax);
+            return new Vector4(_uvRect.xMin, _uvRect.yMin, _uvRect.xMax, _uvRect.yMax);
         }
 
         /// <summary>
@@ -98,7 +101,7 @@ namespace RuntimeAtlasPacker
         /// </summary>
         public void ApplyToMaterialPropertyBlock(MaterialPropertyBlock block, string uvPropertyName = "_MainTex_ST")
         {
-            block.SetVector(uvPropertyName, new Vector4(UVRect.width, UVRect.height, UVRect.x, UVRect.y));
+            block.SetVector(uvPropertyName, new Vector4(_uvRect.width, _uvRect.height, _uvRect.x, _uvRect.y));
         }
 
         /// <summary>
@@ -106,12 +109,15 @@ namespace RuntimeAtlasPacker
         /// </summary>
         public Sprite CreateSprite(float pixelsPerUnit = 100f, Vector2? pivot = null)
         {
-            if (!IsValid) return null;
+            if (!IsValid)
+            {
+                return null;
+            }
 
             var p = pivot ?? new Vector2(0.5f, 0.5f);
             return Sprite.Create(
                 Texture,
-                new UnityEngine.Rect(PixelRect.x, PixelRect.y, PixelRect.width, PixelRect.height),
+                new UnityEngine.Rect(_pixelRect.x, _pixelRect.y, _pixelRect.width, _pixelRect.height),
                 p,
                 pixelsPerUnit
             );
