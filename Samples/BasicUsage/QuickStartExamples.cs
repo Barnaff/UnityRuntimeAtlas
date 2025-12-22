@@ -63,6 +63,7 @@ namespace RuntimeAtlasPacker.Samples
             {
                 var sprite = entry.CreateSprite(pixelsPerUnit: 100f);
                 targetSpriteRenderer.sprite = sprite;
+                Debug.Log($"Created sprite with name: '{sprite.name}'");
             }
         }
 

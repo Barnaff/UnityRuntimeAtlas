@@ -217,6 +217,69 @@ namespace RuntimeAtlasPacker
         }
 
         /// <summary>
+        /// Add a texture to the atlas with sprite properties for proper recreation.
+        /// </summary>
+        /// <param name="texture">The texture to add</param>
+        /// <param name="border">Border values for 9-slicing (left, bottom, right, top)</param>
+        /// <param name="pivot">Pivot point (0-1 normalized)</param>
+        /// <param name="pixelsPerUnit">Pixels per unit value</param>
+        /// <returns>A tuple containing the result status and an AtlasEntry reference (null if not successful).</returns>
+        public (AddResult result, AtlasEntry entry) Add(Texture2D texture, Vector4 border, Vector2 pivot, float pixelsPerUnit = 100f)
+        {
+            if (_isDisposed)
+            {
+#if UNITY_EDITOR
+                Debug.LogWarning("[RuntimeAtlas.Add] Atlas is disposed");
+#endif
+                return (AddResult.Failed, null);
+            }
+            
+            if (texture == null)
+            {
+#if UNITY_EDITOR
+                Debug.LogWarning("[RuntimeAtlas.Add] Null texture provided");
+#endif
+                return (AddResult.InvalidTexture, null);
+            }
+
+            var profiler = RuntimeAtlasProfiler.Begin("Add", GetAtlasName(), $"{texture.name} ({texture.width}x{texture.height})");
+
+            // Use internal method for packing
+            var (result, entry) = AddInternal(texture, border, pivot, pixelsPerUnit);
+            
+            if (result != AddResult.Success)
+            {
+#if UNITY_EDITOR
+                Debug.LogWarning($"[RuntimeAtlas] Add: Failed with result: {result}");
+#endif
+                RuntimeAtlasProfiler.End(profiler);
+                return (result, null);
+            }
+            
+            // Apply texture changes
+            if (entry != null)
+            {
+                try
+                {
+                    var pageTexture = _textures[entry.TextureIndex];
+                    pageTexture.Apply(false, false);
+                    _isDirty = false;
+                }
+                catch (UnityException ex)
+                {
+#if UNITY_EDITOR
+                    Debug.LogWarning($"[RuntimeAtlas] Could not apply texture changes: {ex.Message}");
+#endif
+                }
+            }
+
+            ValidateNoOverlaps();
+
+            RuntimeAtlasProfiler.End(profiler);
+            return (AddResult.Success, entry);
+        }
+
+        /// <summary>
         /// Add a texture to the atlas with a specific name for later retrieval.
         /// If a texture with the same name already exists, it will be replaced.
         /// </summary>
@@ -600,6 +663,133 @@ namespace RuntimeAtlasPacker
             _isDirty = true;
 
             // Auto-repack if enabled
+            if (_settings.RepackOnAdd)
+            {
+                RepackPage(pageIndex);
+            }
+
+            return (AddResult.Success, entry);
+        }
+
+        /// <summary>
+        /// Internal add method with sprite properties that doesn't call Apply - for batch operations
+        /// </summary>
+        private (AddResult result, AtlasEntry entry) AddInternal(Texture2D texture, Vector4 border, Vector2 pivot, float pixelsPerUnit)
+        {
+            if (texture == null)
+            {
+#if UNITY_EDITOR
+                Debug.LogWarning("[RuntimeAtlas.AddInternal] NULL TEXTURE passed!");
+#endif
+                return (AddResult.InvalidTexture, null);
+            }
+
+#if UNITY_EDITOR
+            Debug.Log($"[RuntimeAtlas.AddInternal] ===== Starting pack for '{texture.name}' with sprite properties =====");
+#endif
+
+            var width = texture.width + _settings.Padding * 2;
+            var height = texture.height + _settings.Padding * 2;
+
+            // Check if texture is too large to ever fit
+            if (texture.width > _settings.MaxSize || texture.height > _settings.MaxSize)
+            {
+#if UNITY_EDITOR
+                Debug.LogError($"[RuntimeAtlas.AddInternal] Texture '{texture.name}' ({texture.width}x{texture.height}) exceeds MaxSize ({_settings.MaxSize})");
+#endif
+                return (AddResult.TooLarge, null);
+            }
+
+            // Try to pack in current page first
+            var pageIndex = _currentPageIndex;
+            var packed = TryPackInPage(pageIndex, width, height, out var packedRect);
+            
+            if (!packed)
+            {
+                // Try all existing pages before creating a new one
+                for (var i = 0; i < _textures.Count; i++)
+                {
+                    if (i == pageIndex)
+                    {
+                        continue;
+                    }
+                    
+                    if (TryPackInPage(i, width, height, out packedRect))
+                    {
+                        packed = true;
+                        pageIndex = i;
+                        break;
+                    }
+                }
+                
+                // If still not packed, try creating a new page
+                if (!packed)
+                {
+                    var canCreatePage = _settings.MaxPageCount == -1 || _textures.Count < _settings.MaxPageCount;
+                    
+                    if (!canCreatePage)
+                    {
+#if UNITY_EDITOR
+                        Debug.LogError($"[RuntimeAtlas.AddInternal] Cannot add texture '{texture.name}': Atlas full!");
+#endif
+                        return (AddResult.Full, null);
+                    }
+                    
+                    CreateNewPage();
+                    pageIndex = _currentPageIndex;
+                    packed = TryPackInPage(pageIndex, width, height, out packedRect);
+                    
+                    if (!packed)
+                    {
+#if UNITY_EDITOR
+                        Debug.LogError($"[RuntimeAtlas.AddInternal] Failed to pack '{texture.name}' even in new page!");
+#endif
+                        return (AddResult.Full, null);
+                    }
+                }
+            }
+
+            var currentTexture = _textures[pageIndex];
+            var contentRect = new RectInt(
+                packedRect.x + _settings.Padding,
+                packedRect.y + _settings.Padding,
+                texture.width,
+                texture.height
+            );
+
+            // Blit texture to atlas page
+            try
+            {
+                TextureBlitter.Blit(texture, currentTexture, contentRect.x, contentRect.y);
+            }
+            catch (Exception ex)
+            {
+#if UNITY_EDITOR
+                Debug.LogError($"[RuntimeAtlas.AddInternal] BLIT FAILED for '{texture.name}': {ex.Message}");
+#endif
+                return (AddResult.Failed, null);
+            }
+            
+            // Calculate UV
+            var uvRect = new Rect(
+                (float)contentRect.x / currentTexture.width,
+                (float)contentRect.y / currentTexture.height,
+                (float)contentRect.width / currentTexture.width,
+                (float)contentRect.height / currentTexture.height
+            );
+
+            // Create entry with sprite properties
+            var id = GetNextId();
+            var entry = new AtlasEntry(this, id, pageIndex, contentRect, uvRect, texture.name, border, pivot, pixelsPerUnit);
+            _entries[id] = entry;
+            
+#if UNITY_EDITOR
+            Debug.Log($"[RuntimeAtlas.AddInternal] ===== COMPLETE: Entry ID {id} created for '{texture.name}' on page {pageIndex} with sprite properties =====");
+#endif
+            
+            _version++;
+            _isDirty = true;
+
             if (_settings.RepackOnAdd)
             {
                 RepackPage(pageIndex);

@@ -253,7 +253,14 @@ namespace RuntimeAtlasPacker
 #endif
                 return null;
             }
-            return entry.CreateSprite(pixelsPerUnit ?? sprite.pixelsPerUnit, sprite.pivot / sprite.rect.size);
+            
+            // Preserve border for 9-slicing support
+            var border = sprite.border;
+            return entry.CreateSprite(
+                pixelsPerUnit ?? sprite.pixelsPerUnit, 
+                sprite.pivot / sprite.rect.size,
+                border
+            );
         }
 
         /// <summary>
