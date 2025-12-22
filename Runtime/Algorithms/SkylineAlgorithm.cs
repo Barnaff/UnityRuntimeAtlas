@@ -60,20 +60,37 @@ namespace RuntimeAtlasPacker
             int bestX = 0;
             int bestY = int.MaxValue;
             int bestWidth = 0;
+            int bestScore = int.MaxValue;
 
-            // Find the best position using bottom-left strategy
+            // Find the best position using Best-Fit strategy
+            // We want to minimize the height increase and wasted space
             for (int i = 0; i < _skyline.Length; i++)
             {
                 if (TryFit(i, width, height, out int y))
                 {
-                    var node = _skyline[i];
+                    // Calculate score: prefer lower Y, then minimize gap
+                    // Score = Y + (gap * weight)
+                    // This helps fill gaps before growing upwards
                     
-                    if (y < bestY || (y == bestY && node.X < bestX))
+                    int score = y;
+                    
+                    // Check if this placement fits perfectly in a gap
+                    if (y + height < _height)
+                    {
+                        // If we fit perfectly in width, give bonus
+                        if (i + 1 < _skyline.Length && _skyline[i].Width == width)
+                        {
+                            score -= 1000; // Bonus for perfect width fit
+                        }
+                    }
+
+                    if (score < bestScore || (score == bestScore && _skyline[i].X < bestX))
                     {
                         bestIndex = i;
-                        bestX = node.X;
+                        bestX = _skyline[i].X;
                         bestY = y;
                         bestWidth = width;
+                        bestScore = score;
                     }
                 }
             }
@@ -127,7 +144,6 @@ namespace RuntimeAtlasPacker
 
         private void AddSkylineLevel(int index, int x, int y, int width, int height)
         {
-            // Create new node
             var newNode = new SkylineNode
             {
                 X = x,
@@ -135,20 +151,20 @@ namespace RuntimeAtlasPacker
                 Width = width
             };
 
-            // Insert at the position
-            _skyline.InsertRangeWithBeginEnd(index, index);
+            // Insert the new node
+            _skyline.InsertRangeWithBeginEnd(index, index + 1);
             _skyline[index] = newNode;
 
-            // Shrink or remove affected nodes
+            // Remove nodes that are covered by the new node
             for (int i = index + 1; i < _skyline.Length; i++)
             {
                 var node = _skyline[i];
                 var prev = _skyline[i - 1];
-                
+
                 if (node.X < prev.X + prev.Width)
                 {
                     int shrink = prev.X + prev.Width - node.X;
-                    
+
                     if (shrink >= node.Width)
                     {
                         _skyline.RemoveAt(i);
@@ -171,7 +187,6 @@ namespace RuntimeAtlasPacker
                 }
             }
 
-            // Merge adjacent nodes with same height
             MergeSkyline();
         }
 

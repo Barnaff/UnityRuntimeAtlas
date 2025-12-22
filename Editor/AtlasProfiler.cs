@@ -106,9 +106,19 @@ namespace RuntimeAtlasPacker.Editor
             return ProfileOperationType.Other;
         }
 
+        private List<float> _graphData = new List<float>();
+        private const int MAX_GRAPH_POINTS = 100;
+
         private void OnOperationLogged(ProfileEntry entry)
         {
             _entries.Add(entry);
+            
+            // Add to graph data
+            _graphData.Add((float)entry.DurationMs);
+            while (_graphData.Count > MAX_GRAPH_POINTS)
+            {
+                _graphData.RemoveAt(0);
+            }
             
             // Trim if too many entries
             while (_entries.Count > _maxLogEntries)
@@ -159,8 +169,42 @@ namespace RuntimeAtlasPacker.Editor
         {
             DrawToolbar();
             DrawStatistics();
+            DrawGraph();
             DrawFilters();
             DrawLogEntries();
+        }
+
+        private void DrawGraph()
+        {
+            if (_graphData.Count < 2) return;
+
+            EditorGUILayout.LabelField("Operation Duration (ms)", EditorStyles.boldLabel);
+            var rect = GUILayoutUtility.GetRect(100, 100, GUILayout.ExpandWidth(true));
+            EditorGUI.DrawRect(rect, new Color(0.1f, 0.1f, 0.1f));
+
+            float maxVal = 0;
+            foreach (var val in _graphData) maxVal = Mathf.Max(maxVal, val);
+            if (maxVal == 0) maxVal = 1;
+
+            Handles.BeginGUI();
+            Handles.color = new Color(0.3f, 0.7f, 1f);
+            
+            var points = new List<Vector3>();
+            for (int i = 0; i < _graphData.Count; i++)
+            {
+                float x = rect.x + (rect.width * i / (_graphData.Count - 1));
+                float y = rect.yMax - (rect.height * _graphData[i] / maxVal);
+                points.Add(new Vector3(x, y, 0));
+            }
+            
+            Handles.DrawAAPolyLine(2f, points.ToArray());
+            Handles.EndGUI();
+            
+            GUI.Label(new Rect(rect.x + 5, rect.y + 5, 200, 20), 
+                $"Peak: {maxVal:F2}ms", 
+                new GUIStyle(EditorStyles.miniLabel) { normal = new GUIStyleState { textColor = Color.white } });
+            
+            EditorGUILayout.Space(5);
         }
 
         private void DrawToolbar()

@@ -113,6 +113,8 @@ namespace RuntimeAtlasPacker
             {
                 PackingAlgorithm.MaxRects => new MaxRectsAlgorithm(),
                 PackingAlgorithm.Skyline => new SkylineAlgorithm(),
+                PackingAlgorithm.Guillotine => new GuillotineAlgorithm(),
+                PackingAlgorithm.Shelf => new ShelfAlgorithm(),
                 _ => new MaxRectsAlgorithm()
             };
             
@@ -439,6 +441,12 @@ namespace RuntimeAtlasPacker
             _version++;
             _isDirty = true;
 
+            // Auto-repack if enabled
+            if (_settings.RepackOnAdd)
+            {
+                RepackPage(pageIndex);
+            }
+
             return (AddResult.Success, entry);
         }
 
@@ -627,15 +635,97 @@ namespace RuntimeAtlasPacker
         /// <summary>
         /// Force a full repack of the atlas.
         /// Useful after many removes to reclaim fragmented space.
-        /// Note: Currently not supported for multi-page atlases.
         /// </summary>
         public void Repack()
         {
             if (_isDisposed) throw new ObjectDisposedException(nameof(RuntimeAtlas));
             if (_entries.Count == 0) return;
 
-            Debug.LogWarning("[RuntimeAtlas] Repack is not yet implemented for multi-page atlases. This operation is skipped.");
-            // TODO: Implement per-page repacking for multi-page atlases
+            Debug.Log("[RuntimeAtlas] Starting full repack...");
+
+            // Repack each page individually
+            for (int pageIndex = 0; pageIndex < _textures.Count; pageIndex++)
+            {
+                RepackPage(pageIndex);
+            }
+            
+            _isDirty = true;
+            Apply();
+            Debug.Log("[RuntimeAtlas] Repack complete.");
+        }
+
+        private void RepackPage(int pageIndex)
+        {
+            if (pageIndex < 0 || pageIndex >= _textures.Count) return;
+
+            var texture = _textures[pageIndex];
+            var packer = _packers[pageIndex];
+            
+            // Collect all entries on this page
+            var pageEntries = new List<(AtlasEntry entry, Texture2D texture)>();
+            foreach (var entry in _entries.Values)
+            {
+                if (entry.TextureIndex == pageIndex)
+                {
+                    // Copy current texture data
+                    var tex = TextureBlitter.CopyRegion(texture, entry.Rect);
+                    pageEntries.Add((entry, tex));
+                }
+            }
+
+            if (pageEntries.Count == 0) return;
+
+            Debug.Log($"[RuntimeAtlas] Repacking page {pageIndex} with {pageEntries.Count} entries...");
+
+            // Clear page
+            packer.Clear();
+            var clearPixels = new Color32[texture.width * texture.height];
+            texture.SetPixels32(clearPixels);
+            texture.Apply(); // Force clear to ensure no artifacts remain
+
+            // Sort entries by area (descending) for better packing
+            pageEntries.Sort((a, b) => (b.entry.Width * b.entry.Height).CompareTo(a.entry.Width * a.entry.Height));
+
+            // Re-pack
+            foreach (var (entry, tex) in pageEntries)
+            {
+                int width = tex.width + _settings.Padding * 2;
+                int height = tex.height + _settings.Padding * 2;
+
+                if (packer.TryPack(width, height, out var packedRect))
+                {
+                    var contentRect = new RectInt(
+                        packedRect.x + _settings.Padding,
+                        packedRect.y + _settings.Padding,
+                        tex.width,
+                        tex.height
+                    );
+
+                    // Blit back to atlas
+                    TextureBlitter.Blit(tex, texture, contentRect.x, contentRect.y);
+
+                    // Update entry
+                    var uvRect = new Rect(
+                        (float)contentRect.x / texture.width,
+                        (float)contentRect.y / texture.height,
+                        (float)contentRect.width / texture.width,
+                        (float)contentRect.height / texture.height
+                    );
+                    
+                    entry.UpdateRect(contentRect, uvRect);
+                    OnEntryUpdated?.Invoke(this, entry);
+                }
+                else
+                {
+                    Debug.LogError($"[RuntimeAtlas] Failed to repack entry {entry.Id} on page {pageIndex}. This should not happen if the page was big enough before.");
+                }
+
+                // Cleanup temp texture
+                if (Application.isPlaying)
+                    UnityEngine.Object.Destroy(tex);
+                else
+                    UnityEngine.Object.DestroyImmediate(tex);
+            }
         }
 
         private int GetNextId()

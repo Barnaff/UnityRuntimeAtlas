@@ -137,7 +137,9 @@ namespace RuntimeAtlasPacker.Editor
                     time = time,
                     memoryBytes = _totalMemoryBytes,
                     atlasCount = _totalAtlasCount,
-                    textureCount = _totalTextureCount
+                    textureCount = _totalTextureCount,
+                    gcAllocated = UnityEngine.Profiling.Profiler.GetMonoUsedSizeLong(),
+                    totalAllocated = UnityEngine.Profiling.Profiler.GetTotalAllocatedMemoryLong()
                 });
 
                 while (_graphData.Count > MAX_GRAPH_POINTS)
@@ -158,12 +160,24 @@ namespace RuntimeAtlasPacker.Editor
                 format = atlas.Settings.Format,
                 entryCount = atlas.EntryCount,
                 fillRatio = atlas.FillRatio,
-                texture = atlas.Texture
+                texture = atlas.Texture,
+                pageCount = atlas.PageCount
             };
 
             int bpp = GetBytesPerPixel(info.format);
-            long bytes = (long)info.width * info.height * bpp;
-            if (atlas.Settings.GenerateMipMaps) bytes = (long)(bytes * 1.33f);
+            long bytes = 0;
+
+            // Calculate memory for all pages
+            for (int i = 0; i < atlas.PageCount; i++)
+            {
+                var pageTex = atlas.GetTexture(i);
+                if (pageTex != null)
+                {
+                    long pageBytes = (long)pageTex.width * pageTex.height * bpp;
+                    if (atlas.Settings.GenerateMipMaps) pageBytes = (long)(pageBytes * 1.33f);
+                    bytes += pageBytes;
+                }
+            }
 
             info.memoryBytes = bytes;
             
@@ -288,35 +302,71 @@ namespace RuntimeAtlasPacker.Editor
 
         private void DrawGraph()
         {
-            EditorGUILayout.LabelField("Memory Over Time", EditorStyles.boldLabel);
+            EditorGUILayout.LabelField("Memory Over Time (Normalized)", EditorStyles.boldLabel);
             
-            var rect = GUILayoutUtility.GetRect(100, 100, GUILayout.ExpandWidth(true));
+            var rect = GUILayoutUtility.GetRect(100, 150, GUILayout.ExpandWidth(true));
             EditorGUI.DrawRect(rect, new Color(0.1f, 0.1f, 0.1f));
             
             if (_graphData.Count < 2) return;
 
-            long maxMem = _graphData.Max(p => p.memoryBytes);
-            if (maxMem == 0) return;
+            // Calculate max values for normalization
+            long maxAtlasMem = _graphData.Max(p => p.memoryBytes);
+            long maxGcMem = _graphData.Max(p => p.gcAllocated);
+            long maxTotalMem = _graphData.Max(p => p.totalAllocated);
+
+            if (maxAtlasMem == 0) maxAtlasMem = 1;
+            if (maxGcMem == 0) maxGcMem = 1;
+            if (maxTotalMem == 0) maxTotalMem = 1;
 
             Handles.BeginGUI();
-            Handles.color = new Color(0.3f, 0.7f, 1f);
             
+            // Draw Atlas Memory (Blue)
+            DrawLine(rect, maxAtlasMem, p => p.memoryBytes, new Color(0.3f, 0.7f, 1f));
+            
+            // Draw GC Allocated (Green)
+            DrawLine(rect, maxGcMem, p => p.gcAllocated, new Color(0.3f, 1f, 0.5f));
+            
+            // Draw Total Allocated (Orange)
+            DrawLine(rect, maxTotalMem, p => p.totalAllocated, new Color(1f, 0.7f, 0.3f));
+            
+            Handles.EndGUI();
+            
+            // Legend with values
+            var lastPoint = _graphData[_graphData.Count - 1];
+            
+            GUILayout.BeginHorizontal();
+            DrawLegendItem("Atlas Memory", FormatBytes(lastPoint.memoryBytes), new Color(0.3f, 0.7f, 1f));
+            DrawLegendItem("GC Allocated", FormatBytes(lastPoint.gcAllocated), new Color(0.3f, 1f, 0.5f));
+            DrawLegendItem("Total Allocated", FormatBytes(lastPoint.totalAllocated), new Color(1f, 0.7f, 0.3f));
+            GUILayout.EndHorizontal();
+            
+            EditorGUILayout.Space(5);
+        }
+
+        private void DrawLine(Rect rect, long maxVal, Func<GraphPoint, long> valueSelector, Color color)
+        {
+            Handles.color = color;
             var points = new List<Vector3>();
             for (int i = 0; i < _graphData.Count; i++)
             {
                 float x = rect.x + (rect.width * i / (_graphData.Count - 1));
-                float y = rect.yMax - (rect.height * _graphData[i].memoryBytes / maxMem);
+                float y = rect.yMax - (rect.height * valueSelector(_graphData[i]) / maxVal);
                 points.Add(new Vector3(x, y, 0));
             }
+            Handles.DrawAAPolyLine(2f, points.ToArray());
+        }
+
+        private void DrawLegendItem(string label, string value, Color color)
+        {
+            var oldColor = GUI.color;
+            GUI.color = color;
             
-            Handles.DrawAAPolyLine(3f, points.ToArray());
-            Handles.EndGUI();
+            GUILayout.BeginVertical(GUILayout.Width(150));
+            GUILayout.Label("● " + label, EditorStyles.miniLabel);
+            GUILayout.Label("   " + value, EditorStyles.boldLabel);
+            GUILayout.EndVertical();
             
-            GUI.Label(new Rect(rect.x + 5, rect.y + 5, 200, 20), 
-                $"Peak: {FormatBytes(maxMem)}", 
-                new GUIStyle(EditorStyles.miniLabel) { normal = new GUIStyleState { textColor = Color.white } });
-            
-            EditorGUILayout.Space(5);
+            GUI.color = oldColor;
         }
 
         private void DrawAtlasList()
@@ -407,6 +457,7 @@ namespace RuntimeAtlasPacker.Editor
             public float fillRatio;
             public long memoryBytes;
             public Texture2D texture;
+            public int pageCount;
         }
 
         private struct GraphPoint
@@ -415,6 +466,8 @@ namespace RuntimeAtlasPacker.Editor
             public long memoryBytes;
             public int atlasCount;
             public int textureCount;
+            public long gcAllocated;
+            public long totalAllocated;
         }
     }
 }

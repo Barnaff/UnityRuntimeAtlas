@@ -38,6 +38,9 @@ namespace RuntimeAtlasPacker
         /// <summary>Maximum number of texture pages allowed. -1 = unlimited, 0 = single page only, >0 = specific limit.</summary>
         public int MaxPageCount;
 
+        /// <summary>Whether to automatically repack the atlas when adding new textures to optimize space.</summary>
+        public bool RepackOnAdd;
+
         public static AtlasSettings Default => new AtlasSettings
         {
             InitialSize = 1024,
@@ -49,7 +52,8 @@ namespace RuntimeAtlasPacker
             Readable = false,
             GrowthStrategy = GrowthStrategy.Double,
             Algorithm = PackingAlgorithm.MaxRects,
-            MaxPageCount = -1 // Unlimited pages by default
+            MaxPageCount = -1, // Unlimited pages by default
+            RepackOnAdd = false
         };
 
         public static AtlasSettings Mobile => new AtlasSettings
@@ -94,6 +98,10 @@ namespace RuntimeAtlasPacker
         /// <summary>MaxRects algorithm - best quality packing.</summary>
         MaxRects,
         /// <summary>Skyline algorithm - faster but slightly less efficient.</summary>
-        Skyline
+        Skyline,
+        /// <summary>Guillotine algorithm - splits free areas into smaller rectangles.</summary>
+        Guillotine,
+        /// <summary>Shelf algorithm - simple row-based packing.</summary>
+        Shelf
     }
 }

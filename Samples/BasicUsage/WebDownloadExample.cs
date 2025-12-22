@@ -70,6 +70,12 @@ namespace RuntimeAtlasPacker.Samples
         [Tooltip("Name of the atlas to use (only if useNamedAtlas is true)")]
         public string atlasName = "WebDownloadAtlas";
 
+        [Tooltip("Packing algorithm to use for the atlas")]
+        public PackingAlgorithm packingAlgorithm = PackingAlgorithm.MaxRects;
+
+        [Tooltip("Automatically repack atlas when adding new images to optimize space")]
+        public bool repackOnAdd = false; 
+
         private List<ImageData> _imageDataList = new();
         private CancellationTokenSource _cts;
         private int _imageCounter = 0;
@@ -92,7 +98,8 @@ namespace RuntimeAtlasPacker.Samples
             settings.InitialSize = Mathf.Clamp(initialAtlasSize, 256, maxAtlasSize);
             settings.MaxPageCount = maxPageCount;
             settings.Padding = padding;
-            settings.Algorithm = PackingAlgorithm.Skyline;
+            settings.Algorithm = packingAlgorithm;
+            settings.RepackOnAdd = repackOnAdd;
             // Create or get the atlas with our custom settings
             if (useNamedAtlas && !string.IsNullOrEmpty(atlasName))
             {
