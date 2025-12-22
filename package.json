@@ -1,5 +1,5 @@
 {
-  "name": "com.kobic.runtimeatlaspacker",
+  "name": "com.barnaff.runtimeatlaspacker",
   "version": "1.0.0",
   "displayName": "Runtime Atlas Packer",
   "description": "High-performance runtime texture atlas packing with dynamic updates, Burst compilation, and zero-allocation design. Perfect for dynamic sprite atlasing at runtime.",
