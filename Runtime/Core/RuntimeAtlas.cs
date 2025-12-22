@@ -170,6 +170,12 @@ namespace RuntimeAtlasPacker
                 return (AddResult.InvalidTexture, null);
             }
 
+            // ✅ FIX: Check if texture is readable before proceeding
+            if (!EnsureTextureReadable(texture))
+            {
+                return (AddResult.InvalidTexture, null);
+            }
+
             var profiler = RuntimeAtlasProfiler.Begin("Add", GetAtlasName(), $"{texture.name} ({texture.width}x{texture.height})");
 
 #if UNITY_EDITOR
@@ -239,6 +245,12 @@ namespace RuntimeAtlasPacker
 #if UNITY_EDITOR
                 Debug.LogWarning("[RuntimeAtlas.Add] Null texture provided");
 #endif
+                return (AddResult.InvalidTexture, null);
+            }
+
+            // ✅ FIX: Check if texture is readable before proceeding
+            if (!EnsureTextureReadable(texture))
+            {
                 return (AddResult.InvalidTexture, null);
             }
 
@@ -505,6 +517,37 @@ namespace RuntimeAtlasPacker
         }
         
         /// <summary>
+        /// Ensure a texture is readable before performing operations on it.
+        /// </summary>
+        /// <param name="texture">The texture to check</param>
+        /// <returns>True if the texture is readable or if check is not available, false otherwise</returns>
+        private bool EnsureTextureReadable(Texture2D texture)
+        {
+            if (texture == null)
+                return false;
+
+            try
+            {
+                // Check if texture is readable
+                if (!texture.isReadable)
+                {
+#if UNITY_EDITOR
+                    Debug.LogError($"[RuntimeAtlas] Texture '{texture.name}' is not readable. Enable Read/Write in import settings.");
+#endif
+                    return false;
+                }
+            }
+            catch (Exception)
+            {
+                // Some texture types don't support isReadable check
+                // In this case, we'll try to proceed and catch errors later
+                return true;
+            }
+
+            return true;
+        }
+
+        /// <summary>
         /// Internal add method that doesn't call Apply - for batch operations
         /// Automatically creates new page if current page is full.
         /// </summary>
@@ -639,12 +682,12 @@ namespace RuntimeAtlasPacker
                 return (AddResult.Failed, null);
             }
             
-            // Calculate UV
+            // Calculate UV - ✅ FIX: Ensure float division for precision
             var uvRect = new Rect(
-                (float)contentRect.x / currentTexture.width,
-                (float)contentRect.y / currentTexture.height,
-                (float)contentRect.width / currentTexture.width,
-                (float)contentRect.height / currentTexture.height
+                (float)contentRect.x / (float)currentTexture.width,
+                (float)contentRect.y / (float)currentTexture.height,
+                (float)contentRect.width / (float)currentTexture.width,
+                (float)contentRect.height / (float)currentTexture.height
             );
 
 #if UNITY_EDITOR
@@ -770,12 +813,12 @@ namespace RuntimeAtlasPacker
                 return (AddResult.Failed, null);
             }
             
-            // Calculate UV
+            // Calculate UV - ✅ FIX: Ensure float division for precision
             var uvRect = new Rect(
-                (float)contentRect.x / currentTexture.width,
-                (float)contentRect.y / currentTexture.height,
-                (float)contentRect.width / currentTexture.width,
-                (float)contentRect.height / currentTexture.height
+                (float)contentRect.x / (float)currentTexture.width,
+                (float)contentRect.y / (float)currentTexture.height,
+                (float)contentRect.width / (float)currentTexture.width,
+                (float)contentRect.height / (float)currentTexture.height
             );
 
             // Create entry with sprite properties
@@ -901,11 +944,12 @@ namespace RuntimeAtlasPacker
             {
                 if (entry.TextureIndex == pageIndex)
                 {
+                    // ✅ FIX: Ensure float division for precision
                     var uvRect = new Rect(
-                        (float)entry.Rect.x / newSize,
-                        (float)entry.Rect.y / newSize,
-                        (float)entry.Rect.width / newSize,
-                        (float)entry.Rect.height / newSize
+                        (float)entry.Rect.x / (float)newSize,
+                        (float)entry.Rect.y / (float)newSize,
+                        (float)entry.Rect.width / (float)newSize,
+                        (float)entry.Rect.height / (float)newSize
                     );
                     entry.UpdateRect(entry.Rect, uvRect);
                     OnEntryUpdated?.Invoke(this, entry);
@@ -1106,12 +1150,12 @@ namespace RuntimeAtlasPacker
                     // Blit back to atlas
                     TextureBlitter.Blit(tex, texture, contentRect.x, contentRect.y);
 
-                    // Update entry
+                    // Update entry - ✅ FIX: Ensure float division for precision
                     var uvRect = new Rect(
-                        (float)contentRect.x / texture.width,
-                        (float)contentRect.y / texture.height,
-                        (float)contentRect.width / texture.width,
-                        (float)contentRect.height / texture.height
+                        (float)contentRect.x / (float)texture.width,
+                        (float)contentRect.y / (float)texture.height,
+                        (float)contentRect.width / (float)texture.width,
+                        (float)contentRect.height / (float)texture.height
                     );
                     
                     entry.UpdateRect(contentRect, uvRect);
@@ -1178,50 +1222,94 @@ namespace RuntimeAtlasPacker
 
         public void Dispose()
         {
+            // ✅ FIX: Check if already disposed
             if (_isDisposed)
             {
                 return;
             }
+
             _isDisposed = true;
 
-            foreach (var entry in _entries.Values)
+            try
             {
-                entry.Dispose();
-            }
-            _entries.Clear();
-
-            // Dispose all packers
-            if (_packers != null)
-            {
-                foreach (var packer in _packers)
+                // Dispose entries
+                if (_entries != null)
                 {
-                    packer?.Dispose();
-                }
-                _packers.Clear();
-            }
-
-            // Dispose all textures
-            if (_textures != null)
-            {
-                foreach (var texture in _textures)
-                {
-                    if (texture != null)
+                    foreach (var entry in _entries.Values)
                     {
-                        if (Application.isPlaying)
+                        try
                         {
-                            UnityEngine.Object.Destroy(texture);
+                            entry?.Dispose();
                         }
-                        else
+                        catch (Exception ex)
                         {
-                            UnityEngine.Object.DestroyImmediate(texture);
+#if UNITY_EDITOR
+                            Debug.LogWarning($"[RuntimeAtlas] Error disposing entry: {ex.Message}");
+#endif
                         }
                     }
+                    _entries.Clear();
                 }
-                _textures.Clear();
-            }
 
-            OnAtlasResized = null;
-            OnEntryUpdated = null;
+                _entriesByName?.Clear();
+
+                // Dispose all packers
+                if (_packers != null)
+                {
+                    foreach (var packer in _packers)
+                    {
+                        try
+                        {
+                            packer?.Dispose();
+                        }
+                        catch (Exception ex)
+                        {
+#if UNITY_EDITOR
+                            Debug.LogWarning($"[RuntimeAtlas] Error disposing packer: {ex.Message}");
+#endif
+                        }
+                    }
+                    _packers.Clear();
+                }
+
+                // Dispose all textures
+                if (_textures != null)
+                {
+                    foreach (var texture in _textures)
+                    {
+                        if (texture != null)
+                        {
+                            try
+                            {
+                                if (Application.isPlaying)
+                                {
+                                    UnityEngine.Object.Destroy(texture);
+                                }
+                                else
+                                {
+                                    UnityEngine.Object.DestroyImmediate(texture);
+                                }
+                            }
+                            catch (Exception ex)
+                            {
+#if UNITY_EDITOR
+                                Debug.LogWarning($"[RuntimeAtlas] Error destroying texture: {ex.Message}");
+#endif
+                            }
+                        }
+                    }
+                    _textures.Clear();
+                }
+
+                OnAtlasResized = null;
+                OnEntryUpdated = null;
+            }
+            catch (Exception ex)
+            {
+#if UNITY_EDITOR
+                Debug.LogError($"[RuntimeAtlas] Critical error during dispose: {ex.Message}");
+#endif
+            }
         }
     }
 }

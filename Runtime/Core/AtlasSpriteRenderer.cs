@@ -93,6 +93,14 @@ namespace RuntimeAtlasPacker
         /// </summary>
         public AtlasSpriteRenderer SetEntry(AtlasEntry entry)
         {
+            if (entry == null)
+            {
+                Unbind();
+                _entry = null;
+                ClearSprite();
+                return this;
+            }
+            
             if (_entry == entry)
             {
                 return this;

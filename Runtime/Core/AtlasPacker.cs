@@ -89,9 +89,10 @@ namespace RuntimeAtlasPacker
                 Debug.Log("[AtlasPacker] Default atlas is full, checking overflow atlases...");
 #endif
 
-                // Try existing overflow atlases
+                const int maxOverflowAttempts = 100;
                 var overflowIndex = 1;
-                while (true)
+                
+                while (overflowIndex <= maxOverflowAttempts)
                 {
                     var overflowName = $"[Default_Overflow_{overflowIndex}]";
                     
@@ -132,6 +133,11 @@ namespace RuntimeAtlasPacker
                         return null;
                     }
                 }
+                
+#if UNITY_EDITOR
+                Debug.LogError($"[AtlasPacker] Exceeded maximum overflow atlas limit ({maxOverflowAttempts}). Cannot pack texture.");
+#endif
+                return null;
             }
         }
 
@@ -291,11 +297,14 @@ namespace RuntimeAtlasPacker
                 }
 
                 // Named atlas is full, try overflow atlases
+#if UNITY_EDITOR
                 Debug.Log($"[AtlasPacker] Named atlas '{atlasName}' is full, checking overflow atlases...");
+#endif
 
-                // Try existing overflow atlases
+                const int maxOverflowAttempts = 100;
                 int overflowIndex = 1;
-                while (true)
+                
+                while (overflowIndex <= maxOverflowAttempts)
                 {
                     string overflowName = $"{atlasName}_Overflow_{overflowIndex}";
                     
@@ -304,7 +313,9 @@ namespace RuntimeAtlasPacker
                         (result, entry) = overflowAtlas.Add(texture);
                         if (result == AddResult.Success)
                         {
+#if UNITY_EDITOR
                             Debug.Log($"[AtlasPacker] Added to existing overflow atlas: {overflowName}");
+#endif
                             return entry;
                         }
                         overflowIndex++;
@@ -312,7 +323,9 @@ namespace RuntimeAtlasPacker
                     else
                     {
                         // Create new overflow atlas
+#if UNITY_EDITOR
                         Debug.Log($"[AtlasPacker] Creating new overflow atlas: {overflowName}");
+#endif
                         var newAtlas = new RuntimeAtlas(atlas.Settings);
                         _namedAtlases[overflowName] = newAtlas;
                         _overflowCounters[atlasName] = overflowIndex;
@@ -320,14 +333,23 @@ namespace RuntimeAtlasPacker
                         (result, entry) = newAtlas.Add(texture);
                         if (result == AddResult.Success)
                         {
+#if UNITY_EDITOR
                             Debug.Log($"[AtlasPacker] Successfully added to new overflow atlas: {overflowName}");
+#endif
                             return entry;
                         }
                         
+#if UNITY_EDITOR
                         Debug.LogError($"[AtlasPacker] Failed to add texture even to new overflow atlas! Result: {result}");
+#endif
                         return null;
                     }
                 }
+                
+#if UNITY_EDITOR
+                Debug.LogError($"[AtlasPacker] Exceeded maximum overflow atlas limit ({maxOverflowAttempts}). Cannot pack texture.");
+#endif
+                return null;
             }
         }
 

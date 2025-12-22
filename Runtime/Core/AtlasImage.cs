@@ -136,6 +136,14 @@ namespace RuntimeAtlasPacker
         /// </summary>
         public AtlasImage SetEntry(AtlasEntry entry)
         {
+            if (entry == null)
+            {
+#if UNITY_EDITOR
+                Debug.LogWarning("[AtlasImage] Cannot set null entry", this);
+#endif
+                return this;
+            }
+            
             if (_entry == entry)
             {
                 return this;

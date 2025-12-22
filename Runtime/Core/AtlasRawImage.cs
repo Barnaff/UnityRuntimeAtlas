@@ -73,6 +73,14 @@ namespace RuntimeAtlasPacker
         /// </summary>
         public AtlasRawImage SetEntry(AtlasEntry entry)
         {
+            if (entry == null)
+            {
+                Unbind();
+                _entry = null;
+                ClearImage();
+                return this;
+            }
+            
             if (_entry == entry)
             {
                 return this;
