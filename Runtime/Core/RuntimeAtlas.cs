@@ -1061,6 +1061,41 @@ namespace RuntimeAtlasPacker
         }
 
         /// <summary>
+        /// Get total number of cached sprites across all entries.
+        /// </summary>
+        public int GetTotalCachedSpriteCount()
+        {
+            var count = 0;
+            foreach (var entry in _entries.Values)
+            {
+                count += entry.CachedSpriteCount;
+            }
+            return count;
+        }
+
+        /// <summary>
+        /// Get estimated memory usage of cached sprites in bytes.
+        /// Rough estimate based on sprite object overhead.
+        /// </summary>
+        public long GetCachedSpriteMemoryUsage()
+        {
+            // Rough estimate: ~200 bytes per sprite object (Unity overhead + metadata)
+            const long bytesPerSprite = 200;
+            return GetTotalCachedSpriteCount() * bytesPerSprite;
+        }
+
+        /// <summary>
+        /// Clear all cached sprites in the atlas.
+        /// </summary>
+        public void ClearAllSpriteCaches()
+        {
+            foreach (var entry in _entries.Values)
+            {
+                entry.ClearSpriteCache();
+            }
+        }
+
+        /// <summary>
         /// Force a full repack of the atlas.
         /// Useful after many removes to reclaim fragmented space.
         /// </summary>

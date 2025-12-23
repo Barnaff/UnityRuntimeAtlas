@@ -41,6 +41,9 @@ namespace RuntimeAtlasPacker
         /// <summary>Whether to automatically repack the atlas when adding new textures to optimize space.</summary>
         public bool RepackOnAdd;
 
+        /// <summary>Whether to cache created sprites for reuse. Reduces memory allocations but uses more memory.</summary>
+        public bool EnableSpriteCache;
+
         public static AtlasSettings Default => new AtlasSettings
         {
             InitialSize = 1024,
@@ -53,7 +56,8 @@ namespace RuntimeAtlasPacker
             GrowthStrategy = GrowthStrategy.Double,
             Algorithm = PackingAlgorithm.MaxRects,
             MaxPageCount = -1, // Unlimited pages by default
-            RepackOnAdd = false
+            RepackOnAdd = false,
+            EnableSpriteCache = true
         };
 
         public static AtlasSettings Mobile => new AtlasSettings
@@ -66,7 +70,8 @@ namespace RuntimeAtlasPacker
             GenerateMipMaps = false,
             Readable = false,
             GrowthStrategy = GrowthStrategy.Double,
-            Algorithm = PackingAlgorithm.Skyline
+            Algorithm = PackingAlgorithm.Skyline,
+            EnableSpriteCache = true
         };
 
         public static AtlasSettings HighQuality => new AtlasSettings
@@ -79,7 +84,8 @@ namespace RuntimeAtlasPacker
             GenerateMipMaps = true,
             Readable = false,
             GrowthStrategy = GrowthStrategy.Double,
-            Algorithm = PackingAlgorithm.MaxRects
+            Algorithm = PackingAlgorithm.MaxRects,
+            EnableSpriteCache = true
         };
     }
 

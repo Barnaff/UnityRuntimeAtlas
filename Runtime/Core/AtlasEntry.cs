@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using UnityEngine;
 
 namespace RuntimeAtlasPacker
@@ -17,6 +18,9 @@ namespace RuntimeAtlasPacker
         private Vector4 _border;
         private Vector2 _pivot;
         private float _pixelsPerUnit;
+
+        // Sprite cache - key is hash of (ppu, pivot, border)
+        private Dictionary<int, Sprite> _spriteCache;
 
         // Cached values - updated by atlas
         internal RectInt _pixelRect;
@@ -64,6 +68,9 @@ namespace RuntimeAtlasPacker
         
         /// <summary>Version number that increments whenever the UVs change.</summary>
         public int Version => _version;
+
+        /// <summary>Number of cached sprites for this entry.</summary>
+        public int CachedSpriteCount => _spriteCache?.Count ?? 0;
 
         /// <summary>Event fired when this entry's UV coordinates change.</summary>
         public event Action<AtlasEntry> OnUVChanged;
@@ -135,16 +142,56 @@ namespace RuntimeAtlasPacker
             var ppu = pixelsPerUnit ?? _pixelsPerUnit;
             var p = pivot ?? _pivot;
             var b = border ?? _border;
+
+            // Check cache if enabled
+            if (_atlas != null && _atlas.Settings.EnableSpriteCache)
+            {
+                var cacheKey = GetSpriteCacheKey(ppu, p, b);
+                
+                // Initialize cache if needed
+                if (_spriteCache == null)
+                {
+                    _spriteCache = new Dictionary<int, Sprite>();
+                }
+                
+                // Return cached sprite if available and still valid
+                if (_spriteCache.TryGetValue(cacheKey, out var cachedSprite))
+                {
+                    if (cachedSprite != null)
+                    {
+                        return cachedSprite;
+                    }
+                    else
+                    {
+                        // Cached sprite was destroyed, remove from cache
+                        _spriteCache.Remove(cacheKey);
+                    }
+                }
+                
+                // Create new sprite and cache it
+                var sprite = CreateSpriteInternal(ppu, p, b);
+                if (sprite != null)
+                {
+                    _spriteCache[cacheKey] = sprite;
+                }
+                return sprite;
+            }
             
+            // Caching disabled, create sprite directly
+            return CreateSpriteInternal(ppu, p, b);
+        }
+
+        private Sprite CreateSpriteInternal(float pixelsPerUnit, Vector2 pivot, Vector4 border)
+        {
             // Use the full Sprite.Create overload for proper sprite properties
             var sprite = Sprite.Create(
                 texture: Texture,
                 rect: new UnityEngine.Rect(_pixelRect.x, _pixelRect.y, _pixelRect.width, _pixelRect.height),
-                pivot: p,
-                pixelsPerUnit: ppu,
+                pivot: pivot,
+                pixelsPerUnit: pixelsPerUnit,
                 extrude: 0,
                 meshType: SpriteMeshType.Tight,
-                border: b,
+                border: border,
                 generateFallbackPhysicsShape: false
             );
 
@@ -155,6 +202,43 @@ namespace RuntimeAtlasPacker
             }
 
             return sprite;
+        }
+
+        private int GetSpriteCacheKey(float pixelsPerUnit, Vector2 pivot, Vector4 border)
+        {
+            unchecked
+            {
+                var hash = 17;
+                hash = hash * 31 + pixelsPerUnit.GetHashCode();
+                hash = hash * 31 + pivot.GetHashCode();
+                hash = hash * 31 + border.GetHashCode();
+                return hash;
+            }
+        }
+
+        /// <summary>
+        /// Clears the sprite cache for this entry, destroying all cached sprites.
+        /// </summary>
+        public void ClearSpriteCache()
+        {
+            if (_spriteCache != null)
+            {
+                foreach (var sprite in _spriteCache.Values)
+                {
+                    if (sprite != null)
+                    {
+                        if (Application.isPlaying)
+                        {
+                            UnityEngine.Object.Destroy(sprite);
+                        }
+                        else
+                        {
+                            UnityEngine.Object.DestroyImmediate(sprite);
+                        }
+                    }
+                }
+                _spriteCache.Clear();
+            }
         }
 
         /// <summary>
@@ -172,6 +256,10 @@ namespace RuntimeAtlasPacker
         {
             if (_isDisposed) return;
             _isDisposed = true;
+            
+            // Clear sprite cache
+            ClearSpriteCache();
+            
             OnUVChanged = null;
             _atlas = null;
         }

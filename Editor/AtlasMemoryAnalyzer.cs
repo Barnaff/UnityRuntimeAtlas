@@ -186,9 +186,14 @@ namespace RuntimeAtlasPacker.Editor
             }
 
             info.MemoryBytes = bytes;
+            
+            // Add sprite cache memory
+            var cacheMemory = atlas.GetCachedSpriteMemoryUsage();
+            info.CachedSpriteCount = atlas.GetTotalCachedSpriteCount();
+            info.CachedSpriteMemoryBytes = cacheMemory;
 
             _atlases.Add(info);
-            _totalMemoryBytes += bytes;
+            _totalMemoryBytes += bytes + cacheMemory;
             _totalAtlasCount++;
             _totalTextureCount += info.EntryCount;
         }
@@ -388,6 +393,7 @@ namespace RuntimeAtlasPacker.Editor
             EditorGUILayout.LabelField("Format", EditorStyles.boldLabel, GUILayout.Width(70));
             EditorGUILayout.LabelField("Textures", EditorStyles.boldLabel, GUILayout.Width(60));
             EditorGUILayout.LabelField("Fill", EditorStyles.boldLabel, GUILayout.Width(50));
+            EditorGUILayout.LabelField("Cache", EditorStyles.boldLabel, GUILayout.Width(70));
             EditorGUILayout.LabelField("Memory", EditorStyles.boldLabel, GUILayout.ExpandWidth(true));
             EditorGUILayout.EndHorizontal();
 
@@ -408,7 +414,24 @@ namespace RuntimeAtlasPacker.Editor
                 EditorGUILayout.LabelField($"{atlas.FillRatio * 100:F0}%", GUILayout.Width(50));
                 GUI.contentColor = oldColor;
 
-                EditorGUILayout.LabelField(FormatBytes(atlas.MemoryBytes), GUILayout.ExpandWidth(true));
+                // Show cached sprite count
+                if (atlas.CachedSpriteCount > 0)
+                {
+                    GUI.contentColor = Color.yellow;
+                    EditorGUILayout.LabelField($"{atlas.CachedSpriteCount}", GUILayout.Width(70));
+                    GUI.contentColor = oldColor;
+                }
+                else
+                {
+                    EditorGUILayout.LabelField("-", GUILayout.Width(70));
+                }
+
+                // Show total memory (texture + cache)
+                var totalMem = atlas.MemoryBytes + atlas.CachedSpriteMemoryBytes;
+                var memLabel = atlas.CachedSpriteMemoryBytes > 0 
+                    ? $"{FormatBytes(totalMem)} ({FormatBytes(atlas.CachedSpriteMemoryBytes)} cached)"
+                    : FormatBytes(totalMem);
+                EditorGUILayout.LabelField(memLabel, GUILayout.ExpandWidth(true));
 
                 EditorGUILayout.EndHorizontal();
             }
@@ -433,7 +456,13 @@ namespace RuntimeAtlasPacker.Editor
                 EditorGUILayout.BeginVertical("box");
 
                 EditorGUILayout.LabelField($"{atlas.Name} - {atlas.Width}x{atlas.Height}", EditorStyles.boldLabel);
-                EditorGUILayout.LabelField($"Textures: {atlas.EntryCount}, Fill: {atlas.FillRatio * 100:F0}%, Memory: {FormatBytes(atlas.MemoryBytes)}");
+                
+                var infoText = $"Textures: {atlas.EntryCount}, Fill: {atlas.FillRatio * 100:F0}%, Memory: {FormatBytes(atlas.MemoryBytes)}";
+                if (atlas.CachedSpriteCount > 0)
+                {
+                    infoText += $", Cached Sprites: {atlas.CachedSpriteCount} ({FormatBytes(atlas.CachedSpriteMemoryBytes)})";
+                }
+                EditorGUILayout.LabelField(infoText);
 
                 var previewSize = Mathf.Min(300, position.width - 40);
                 var aspect = (float)atlas.Height / atlas.Width;
@@ -479,6 +508,8 @@ namespace RuntimeAtlasPacker.Editor
             public long MemoryBytes;
             public Texture2D Texture;
             public int PageCount;
+            public int CachedSpriteCount;
+            public long CachedSpriteMemoryBytes;
         }
 
         private struct GraphPoint

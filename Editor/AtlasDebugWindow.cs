@@ -642,6 +642,22 @@ namespace RuntimeAtlasPacker.Editor
             EditorGUILayout.LabelField($"Entries: {_selectedAtlas.EntryCount}");
             EditorGUILayout.LabelField($"Fill Ratio: {_selectedAtlas.FillRatio:P1}");
             EditorGUILayout.LabelField($"Memory: {FormatBytes(CalculateMemoryUsage(_selectedAtlas))}");
+            
+            // Sprite cache info
+            var cachedCount = _selectedAtlas.GetTotalCachedSpriteCount();
+            var cacheMemory = _selectedAtlas.GetCachedSpriteMemoryUsage();
+            var cacheEnabled = _selectedAtlas.Settings.EnableSpriteCache;
+            
+            EditorGUILayout.BeginHorizontal();
+            EditorGUILayout.LabelField($"Sprite Cache: {(cacheEnabled ? "Enabled" : "Disabled")}");
+            if (cacheEnabled && cachedCount > 0)
+            {
+                GUI.color = Color.yellow;
+                EditorGUILayout.LabelField($"({cachedCount} cached, {FormatBytes(cacheMemory)})", EditorStyles.miniLabel);
+                GUI.color = oldColor;
+            }
+            EditorGUILayout.EndHorizontal();
+            
             EditorGUILayout.LabelField($"Version: {_selectedAtlas.Version}");
             EditorGUILayout.LabelField($"Format: {_selectedAtlas.Settings.Format}");
             EditorGUILayout.LabelField($"Algorithm: {_selectedAtlas.Settings.Algorithm}");
@@ -672,6 +688,13 @@ namespace RuntimeAtlasPacker.Editor
             {
                 _selectedAtlas.Repack();
                 RefreshData();
+            }
+            
+            if (GUILayout.Button("Clear Sprite Cache"))
+            {
+                _selectedAtlas.ClearAllSpriteCaches();
+                RefreshData();
+                Debug.Log($"[AtlasDebug] Cleared sprite cache for atlas: {_selectedAtlas.Texture.name}");
             }
             
             GUI.enabled = _selectedEntry != null;
@@ -827,6 +850,15 @@ namespace RuntimeAtlasPacker.Editor
                 
                 EditorGUILayout.LabelField($"{entry.Width}x{entry.Height}", GUILayout.Width(70));
                 EditorGUILayout.LabelField($"UV: ({entry.UV.x:F2}, {entry.UV.y:F2})", GUILayout.Width(100));
+                
+                // Show cached sprite count if any
+                if (entry.CachedSpriteCount > 0)
+                {
+                    var oldColor = GUI.color;
+                    GUI.color = Color.yellow;
+                    EditorGUILayout.LabelField($"[{entry.CachedSpriteCount} cached]", GUILayout.Width(70));
+                    GUI.color = oldColor;
+                }
                 
                 // Find renderers using this entry
                 int rendererCount = _rendererInfoCache.Count(r => r.EntryId == entry.Id);
