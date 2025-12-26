@@ -189,7 +189,6 @@ namespace RuntimeAtlasPacker.Editor
             
             // Add sprite cache memory
             var cacheMemory = atlas.GetCachedSpriteMemoryUsage();
-            info.CachedSpriteCount = atlas.GetTotalCachedSpriteCount();
             info.CachedSpriteMemoryBytes = cacheMemory;
 
             _atlases.Add(info);
@@ -414,11 +413,11 @@ namespace RuntimeAtlasPacker.Editor
                 EditorGUILayout.LabelField($"{atlas.FillRatio * 100:F0}%", GUILayout.Width(50));
                 GUI.contentColor = oldColor;
 
-                // Show cached sprite count
-                if (atlas.CachedSpriteCount > 0)
+                // Show cached sprite memory
+                if (atlas.CachedSpriteMemoryBytes > 0)
                 {
                     GUI.contentColor = Color.yellow;
-                    EditorGUILayout.LabelField($"{atlas.CachedSpriteCount}", GUILayout.Width(70));
+                    EditorGUILayout.LabelField($"{FormatBytes(atlas.CachedSpriteMemoryBytes)}", GUILayout.Width(70));
                     GUI.contentColor = oldColor;
                 }
                 else
@@ -458,9 +457,9 @@ namespace RuntimeAtlasPacker.Editor
                 EditorGUILayout.LabelField($"{atlas.Name} - {atlas.Width}x{atlas.Height}", EditorStyles.boldLabel);
                 
                 var infoText = $"Textures: {atlas.EntryCount}, Fill: {atlas.FillRatio * 100:F0}%, Memory: {FormatBytes(atlas.MemoryBytes)}";
-                if (atlas.CachedSpriteCount > 0)
+                if (atlas.CachedSpriteMemoryBytes > 0)
                 {
-                    infoText += $", Cached Sprites: {atlas.CachedSpriteCount} ({FormatBytes(atlas.CachedSpriteMemoryBytes)})";
+                    infoText += $", Cached Sprites: {FormatBytes(atlas.CachedSpriteMemoryBytes)}";
                 }
                 EditorGUILayout.LabelField(infoText);
 
@@ -508,7 +507,6 @@ namespace RuntimeAtlasPacker.Editor
             public long MemoryBytes;
             public Texture2D Texture;
             public int PageCount;
-            public int CachedSpriteCount;
             public long CachedSpriteMemoryBytes;
         }
 

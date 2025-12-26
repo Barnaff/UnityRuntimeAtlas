@@ -1,5 +1,4 @@
 using System;
-using System.Collections.Generic;
 using UnityEngine;
 
 namespace RuntimeAtlasPacker
@@ -19,8 +18,8 @@ namespace RuntimeAtlasPacker
         private Vector2 _pivot;
         private float _pixelsPerUnit;
 
-        // Sprite cache - key is hash of (ppu, pivot, border)
-        private Dictionary<int, Sprite> _spriteCache;
+        // Sprite cache - only stores default sprite (100 PPU, center pivot, no border)
+        private Sprite _cachedSprite;
 
         // Cached values - updated by atlas
         internal RectInt _pixelRect;
@@ -69,8 +68,8 @@ namespace RuntimeAtlasPacker
         /// <summary>Version number that increments whenever the UVs change.</summary>
         public int Version => _version;
 
-        /// <summary>Number of cached sprites for this entry.</summary>
-        public int CachedSpriteCount => _spriteCache?.Count ?? 0;
+        /// <summary>Whether this entry has a cached default sprite.</summary>
+        public bool HasCachedSprite => _cachedSprite != null;
 
         /// <summary>Event fired when this entry's UV coordinates change.</summary>
         public event Action<AtlasEntry> OnUVChanged;
@@ -128,6 +127,7 @@ namespace RuntimeAtlasPacker
 
         /// <summary>
         /// Creates a Unity Sprite from this atlas entry.
+        /// Only default sprites (100 PPU, center pivot, no border) are cached.
         /// </summary>
         /// <param name="pixelsPerUnit">Pixels per unit for the sprite. If null, uses stored value.</param>
         /// <param name="pivot">Pivot point (0-1 normalized). If null, uses stored value.</param>
@@ -143,41 +143,28 @@ namespace RuntimeAtlasPacker
             var p = pivot ?? _pivot;
             var b = border ?? _border;
 
-            // Check cache if enabled
-            if (_atlas != null && _atlas.Settings.EnableSpriteCache)
+            // Check if this is a default configuration
+            bool isDefaultConfig = IsDefaultConfiguration(ppu, p, b);
+
+            // Check cache if enabled and this is a default configuration
+            if (_atlas != null && _atlas.Settings.EnableSpriteCache && isDefaultConfig)
             {
-                var cacheKey = GetSpriteCacheKey(ppu, p, b);
-                
-                // Initialize cache if needed
-                if (_spriteCache == null)
-                {
-                    _spriteCache = new Dictionary<int, Sprite>();
-                }
-                
                 // Return cached sprite if available and still valid
-                if (_spriteCache.TryGetValue(cacheKey, out var cachedSprite))
+                if (_cachedSprite != null)
                 {
-                    if (cachedSprite != null)
-                    {
-                        return cachedSprite;
-                    }
-                    else
-                    {
-                        // Cached sprite was destroyed, remove from cache
-                        _spriteCache.Remove(cacheKey);
-                    }
+                    return _cachedSprite;
                 }
                 
                 // Create new sprite and cache it
                 var sprite = CreateSpriteInternal(ppu, p, b);
                 if (sprite != null)
                 {
-                    _spriteCache[cacheKey] = sprite;
+                    _cachedSprite = sprite;
                 }
                 return sprite;
             }
             
-            // Caching disabled, create sprite directly
+            // Caching disabled or custom configuration, create sprite directly without caching
             return CreateSpriteInternal(ppu, p, b);
         }
 
@@ -204,40 +191,42 @@ namespace RuntimeAtlasPacker
             return sprite;
         }
 
-        private int GetSpriteCacheKey(float pixelsPerUnit, Vector2 pivot, Vector4 border)
+        private bool IsDefaultConfiguration(float pixelsPerUnit, Vector2 pivot, Vector4 border)
         {
-            unchecked
-            {
-                var hash = 17;
-                hash = hash * 31 + pixelsPerUnit.GetHashCode();
-                hash = hash * 31 + pivot.GetHashCode();
-                hash = hash * 31 + border.GetHashCode();
-                return hash;
-            }
+            const float pivotTolerance = 0.001f;
+            const float ppu = 100f;
+            
+            // Check if PPU is 100
+            if (Mathf.Abs(pixelsPerUnit - ppu) > 0.001f)
+                return false;
+            
+            // Check if pivot is center (0.5, 0.5)
+            if (Mathf.Abs(pivot.x - 0.5f) > pivotTolerance || Mathf.Abs(pivot.y - 0.5f) > pivotTolerance)
+                return false;
+            
+            // Check if border is zero (no 9-slicing)
+            if (border.x != 0 || border.y != 0 || border.z != 0 || border.w != 0)
+                return false;
+            
+            return true;
         }
 
         /// <summary>
-        /// Clears the sprite cache for this entry, destroying all cached sprites.
+        /// Clears the sprite cache for this entry, destroying the cached sprite.
         /// </summary>
         public void ClearSpriteCache()
         {
-            if (_spriteCache != null)
+            if (_cachedSprite != null)
             {
-                foreach (var sprite in _spriteCache.Values)
+                if (Application.isPlaying)
                 {
-                    if (sprite != null)
-                    {
-                        if (Application.isPlaying)
-                        {
-                            UnityEngine.Object.Destroy(sprite);
-                        }
-                        else
-                        {
-                            UnityEngine.Object.DestroyImmediate(sprite);
-                        }
-                    }
+                    UnityEngine.Object.Destroy(_cachedSprite);
                 }
-                _spriteCache.Clear();
+                else
+                {
+                    UnityEngine.Object.DestroyImmediate(_cachedSprite);
+                }
+                _cachedSprite = null;
             }
         }
 

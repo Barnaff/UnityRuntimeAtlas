@@ -1061,19 +1061,6 @@ namespace RuntimeAtlasPacker
         }
 
         /// <summary>
-        /// Get total number of cached sprites across all entries.
-        /// </summary>
-        public int GetTotalCachedSpriteCount()
-        {
-            var count = 0;
-            foreach (var entry in _entries.Values)
-            {
-                count += entry.CachedSpriteCount;
-            }
-            return count;
-        }
-
-        /// <summary>
         /// Get estimated memory usage of cached sprites in bytes.
         /// Rough estimate based on sprite object overhead.
         /// </summary>
@@ -1081,7 +1068,7 @@ namespace RuntimeAtlasPacker
         {
             // Rough estimate: ~200 bytes per sprite object (Unity overhead + metadata)
             const long bytesPerSprite = 200;
-            return GetTotalCachedSpriteCount() * bytesPerSprite;
+            return bytesPerSprite;
         }
 
         /// <summary>

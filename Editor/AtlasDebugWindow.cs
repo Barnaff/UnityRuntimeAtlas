@@ -644,16 +644,15 @@ namespace RuntimeAtlasPacker.Editor
             EditorGUILayout.LabelField($"Memory: {FormatBytes(CalculateMemoryUsage(_selectedAtlas))}");
             
             // Sprite cache info
-            var cachedCount = _selectedAtlas.GetTotalCachedSpriteCount();
             var cacheMemory = _selectedAtlas.GetCachedSpriteMemoryUsage();
             var cacheEnabled = _selectedAtlas.Settings.EnableSpriteCache;
             
             EditorGUILayout.BeginHorizontal();
             EditorGUILayout.LabelField($"Sprite Cache: {(cacheEnabled ? "Enabled" : "Disabled")}");
-            if (cacheEnabled && cachedCount > 0)
+            if (cacheEnabled && cacheMemory > 0)
             {
                 GUI.color = Color.yellow;
-                EditorGUILayout.LabelField($"({cachedCount} cached, {FormatBytes(cacheMemory)})", EditorStyles.miniLabel);
+                EditorGUILayout.LabelField($"({FormatBytes(cacheMemory)})", EditorStyles.miniLabel);
                 GUI.color = oldColor;
             }
             EditorGUILayout.EndHorizontal();
@@ -852,11 +851,11 @@ namespace RuntimeAtlasPacker.Editor
                 EditorGUILayout.LabelField($"UV: ({entry.UV.x:F2}, {entry.UV.y:F2})", GUILayout.Width(100));
                 
                 // Show cached sprite count if any
-                if (entry.CachedSpriteCount > 0)
+                if (entry.HasCachedSprite)
                 {
                     var oldColor = GUI.color;
                     GUI.color = Color.yellow;
-                    EditorGUILayout.LabelField($"[{entry.CachedSpriteCount} cached]", GUILayout.Width(70));
+                    EditorGUILayout.LabelField($"[cached]", GUILayout.Width(70));
                     GUI.color = oldColor;
                 }
                 
