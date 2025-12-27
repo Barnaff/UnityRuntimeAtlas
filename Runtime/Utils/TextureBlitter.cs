@@ -86,7 +86,6 @@ Shader ""Hidden/RuntimeAtlasPacker/Blit""
         }
 
         /// <summary>
-        /// <summary>
         /// Blit a source texture to a target texture at the specified position.
         /// Works with both readable and non-readable textures.
         /// </summary>
@@ -95,12 +94,94 @@ Shader ""Hidden/RuntimeAtlasPacker/Blit""
             if (source == null || target == null)
                 throw new ArgumentNullException();
 
-            Debug.Log($"[TextureBlitter] Blitting '{source.name}' ({source.width}x{source.height}) to ({x}, {y})");
-            Debug.Log($"[TextureBlitter] Source: readable={source.isReadable}, format={source.format}");
-            Debug.Log($"[TextureBlitter] Target: readable={target.isReadable}, format={target.format}");
-
             // Use Material-based rendering - works with ALL textures
             BlitWithMaterial(source, target, x, y);
+        }
+
+        /// <summary>
+        /// Batch blit multiple textures to a target texture.
+        /// Much more efficient than calling Blit multiple times.
+        /// </summary>
+        /// <param name="operations">Array of (source, x, y) tuples</param>
+        /// <param name="target">Target texture to blit to</param>
+        public static void BatchBlit(Texture2D target, params (Texture2D source, int x, int y)[] operations)
+        {
+            if (target == null || operations == null || operations.Length == 0)
+                return;
+
+            EnsureMaterial();
+            
+            RenderTexture rt = null;
+            RenderTexture prevActive = RenderTexture.active;
+            
+            try
+            {
+                // Create RenderTexture matching target size ONCE
+                rt = RenderTexture.GetTemporary(
+                    target.width, 
+                    target.height, 
+                    0, 
+                    RenderTextureFormat.ARGB32,
+                    RenderTextureReadWrite.sRGB
+                );
+                rt.filterMode = FilterMode.Point;
+                
+                // Preserve existing atlas content
+                Graphics.Blit(target, rt);
+                
+                // Activate RT for rendering
+                RenderTexture.active = rt;
+                
+                Material blitMat = GetBlitMaterial();
+                
+                // Batch all draw operations
+                GL.PushMatrix();
+                GL.LoadPixelMatrix(0, target.width, target.height, 0);
+                
+                for (int i = 0; i < operations.Length; i++)
+                {
+                    var (source, x, y) = operations[i];
+                    if (source == null) continue;
+                    
+                    // Flip Y coordinate
+                    float yFlipped = target.height - y - source.height;
+                    Rect destRect = new Rect(x, yFlipped, source.width, source.height);
+                    
+                    if (blitMat != null)
+                    {
+                        blitMat.mainTexture = source;
+                        Graphics.DrawTexture(destRect, source, blitMat);
+                    }
+                    else
+                    {
+                        Graphics.DrawTexture(destRect, source);
+                    }
+                }
+                
+                GL.PopMatrix();
+                RenderTexture.active = null;
+                
+                // Copy result back to target texture ONCE
+                RenderTexture.active = rt;
+                target.ReadPixels(new Rect(0, 0, rt.width, rt.height), 0, 0, false);
+                target.Apply(false, false);
+                RenderTexture.active = null;
+            }
+            catch (System.Exception ex)
+            {
+#if UNITY_EDITOR
+                Debug.LogError($"[TextureBlitter.BatchBlit] FAILED: {ex.Message}");
+#endif
+                throw;
+            }
+            finally
+            {
+                RenderTexture.active = prevActive;
+                if (rt != null)
+                {
+                    RenderTexture.ReleaseTemporary(rt);
+                }
+            }
         }
 
         /// <summary>
@@ -128,8 +209,6 @@ Shader ""Hidden/RuntimeAtlasPacker/Blit""
         /// </summary>
         private static void BlitWithMaterial(Texture2D source, Texture2D target, int x, int y)
         {
-            Debug.Log($"[TextureBlitter.Material] Starting blit for '{source.name}' at ({x},{y})");
-            
             EnsureMaterial();
             
             RenderTexture rt = null;
@@ -144,23 +223,19 @@ Shader ""Hidden/RuntimeAtlasPacker/Blit""
                     target.height, 
                     0, 
                     RenderTextureFormat.ARGB32,
-                    RenderTextureReadWrite.sRGB  // Changed from Linear to sRGB for proper colors
+                    RenderTextureReadWrite.sRGB
                 );
                 rt.filterMode = FilterMode.Point;
                 
-                Debug.Log($"[TextureBlitter.Material] Step 1: Copy existing target to RT");
                 // Preserve existing atlas content
                 Graphics.Blit(target, rt);
                 
-                Debug.Log($"[TextureBlitter.Material] Step 2: Draw source at ({x},{y}) using Material");
                 // Activate RT for rendering
                 RenderTexture.active = rt;
                 
                 // CRITICAL FIX: Flip Y coordinate because Unity's texture coordinates are bottom-left origin
                 // but we're using top-left pixel coordinates
                 float yFlipped = target.height - y - source.height;
-                
-                Debug.Log($"[TextureBlitter.Material] Original Y: {y}, Flipped Y: {yFlipped}");
                 
                 // Use Graphics.Blit with custom material for precise positioning
                 Material blitMat = GetBlitMaterial();
@@ -194,18 +269,17 @@ Shader ""Hidden/RuntimeAtlasPacker/Blit""
                 
                 RenderTexture.active = null;
                 
-                Debug.Log($"[TextureBlitter.Material] Step 3: Copy RT back to target");
                 // Copy result back to target texture
                 RenderTexture.active = rt;
                 target.ReadPixels(new Rect(0, 0, rt.width, rt.height), 0, 0, false);
                 target.Apply(false, false);
                 RenderTexture.active = null;
-                
-                Debug.Log($"[TextureBlitter.Material] SUCCESS - blit complete");
             }
             catch (System.Exception ex)
             {
+#if UNITY_EDITOR
                 Debug.LogError($"[TextureBlitter.Material] FAILED: {ex.Message}\n{ex.StackTrace}");
+#endif
                 throw;
             }
             finally

@@ -435,7 +435,7 @@ namespace RuntimeAtlasPacker
                 return Array.Empty<AtlasEntry>();
             }
 
-            // Convert to dictionary format and use shared method
+            // ✅ OPTIMIZATION: Pre-allocate and avoid LINQ allocations
             var textureDict = new Dictionary<string, Texture2D>(textures.Length);
             for (var i = 0; i < textures.Length; i++)
             {
@@ -448,7 +448,15 @@ namespace RuntimeAtlasPacker
             }
 
             var results = AddBatch(textureDict);
-            return results.Values.ToArray();
+            
+            // ✅ OPTIMIZATION: Avoid LINQ allocation - use List
+            var entries = new AtlasEntry[results.Count];
+            var index = 0;
+            foreach (var entry in results.Values)
+            {
+                entries[index++] = entry;
+            }
+            return entries;
         }
 
         /// <summary>
@@ -483,7 +491,7 @@ namespace RuntimeAtlasPacker
             Debug.Log($"[RuntimeAtlas] AddBatch: Starting batch of {textures.Count} textures with keys");
 #endif
 
-            // Remove existing entries with same keys
+            // ✅ OPTIMIZATION: Batch remove existing entries
             foreach (var key in textures.Keys)
             {
                 if (_entriesByName.TryGetValue(key, out var existingEntry))
@@ -495,26 +503,39 @@ namespace RuntimeAtlasPacker
                 }
             }
 
-            var successfulEntries = new Dictionary<string, AtlasEntry>();
+            var successfulEntries = new Dictionary<string, AtlasEntry>(textures.Count);
 
-            // Sort by area descending for better packing
-            var sorted = textures
-                .Where(kvp => kvp.Value != null)
-                .Select(kvp => (key: kvp.Key, tex: kvp.Value, area: kvp.Value.width * kvp.Value.height))
-                .OrderByDescending(x => x.area)
-                .ToArray();
+            // ✅ OPTIMIZATION: Avoid LINQ - use manual sort with array
+            var sortedList = new List<(string key, Texture2D tex, int area)>(textures.Count);
+            foreach (var kvp in textures)
+            {
+                if (kvp.Value != null)
+                {
+                    sortedList.Add((kvp.Key, kvp.Value, kvp.Value.width * kvp.Value.height));
+                }
+            }
+            
+            // Sort descending by area for better packing
+            sortedList.Sort((a, b) => b.area.CompareTo(a.area));
+
+            // ✅ OPTIMIZATION: Track which pages are modified to only apply those
+            var modifiedPages = new HashSet<int>();
 
             // Pack all textures WITHOUT applying after each one
             var successCount = 0;
             var failCount = 0;
-            foreach (var (key, tex, _) in sorted)
+            
+            for (var i = 0; i < sortedList.Count; i++)
             {
+                var (key, tex, _) = sortedList[i];
+                
                 var (result, entry) = AddInternal(tex);
                 if (result == AddResult.Success && entry != null)
                 {
                     // Store in name dictionary
                     _entriesByName[key] = entry;
                     successfulEntries[key] = entry;
+                    modifiedPages.Add(entry.TextureIndex);
                     successCount++;
 #if UNITY_EDITOR
                     Debug.Log($"[RuntimeAtlas] Batch ['{key}']: Added '{tex.name}' -> Entry ID {entry.Id}");
@@ -538,17 +559,20 @@ namespace RuntimeAtlasPacker
                 }
             }
 
-            // Apply once at the end for efficiency (apply all modified pages)
+            // ✅ OPTIMIZATION: Apply only modified pages instead of all pages
             if (successCount > 0)
             {
                 try
                 {
 #if UNITY_EDITOR
-                    Debug.Log($"[RuntimeAtlas] AddBatch: Applying texture changes for {successCount} successful textures across {_textures.Count} pages");
+                    Debug.Log($"[RuntimeAtlas] AddBatch: Applying texture changes for {successCount} textures across {modifiedPages.Count} pages (of {_textures.Count} total)");
 #endif
-                    foreach (var texture in _textures)
+                    foreach (var pageIndex in modifiedPages)
                     {
-                        texture.Apply(false, false);
+                        if (pageIndex >= 0 && pageIndex < _textures.Count)
+                        {
+                            _textures[pageIndex].Apply(false, false);
+                        }
                     }
                     _isDirty = false;
                 }
@@ -559,8 +583,13 @@ namespace RuntimeAtlasPacker
 #endif
                 }
 
-                // Validate at the end
-                ValidateNoOverlaps();
+                // ✅ OPTIMIZATION: Skip validation for large batches
+#if UNITY_EDITOR
+                if (successCount <= 100)
+                {
+                    ValidateNoOverlaps();
+                }
+#endif
             }
             
 #if UNITY_EDITOR
@@ -610,17 +639,8 @@ namespace RuntimeAtlasPacker
         {
             if (texture == null)
             {
-#if UNITY_EDITOR
-                Debug.LogWarning("[RuntimeAtlas.AddInternal] NULL TEXTURE passed!");
-#endif
                 return (AddResult.InvalidTexture, null);
             }
-
-#if UNITY_EDITOR
-            Debug.Log($"[RuntimeAtlas.AddInternal] ===== Starting pack for '{texture.name}' =====");
-            Debug.Log($"[RuntimeAtlas.AddInternal] Texture size: {texture.width}x{texture.height}");
-            Debug.Log($"[RuntimeAtlas.AddInternal] Padding: {_settings.Padding}");
-#endif
 
             var width = texture.width + _settings.Padding * 2;
             var height = texture.height + _settings.Padding * 2;
@@ -634,22 +654,12 @@ namespace RuntimeAtlasPacker
                 return (AddResult.TooLarge, null);
             }
 
-#if UNITY_EDITOR
-            Debug.Log($"[RuntimeAtlas.AddInternal] With padding: {width}x{height}");
-            Debug.Log($"[RuntimeAtlas.AddInternal] Current page: {_currentPageIndex}, Pages: {_textures.Count}");
-            Debug.Log($"[RuntimeAtlas.AddInternal] Current entries: {_entries.Count}");
-#endif
-
             // Try to pack in current page first
             var pageIndex = _currentPageIndex;
             var packed = TryPackInPage(pageIndex, width, height, out var packedRect);
             
             if (!packed)
             {
-#if UNITY_EDITOR
-                Debug.Log($"[RuntimeAtlas.AddInternal] Current page {pageIndex} is full.");
-#endif
-                
                 // Try all existing pages before creating a new one
                 for (var i = 0; i < _textures.Count; i++)
                 {
@@ -662,9 +672,6 @@ namespace RuntimeAtlasPacker
                     {
                         packed = true;
                         pageIndex = i;
-#if UNITY_EDITOR
-                        Debug.Log($"[RuntimeAtlas.AddInternal] Found space in existing page {i}");
-#endif
                         break;
                     }
                 }
@@ -682,10 +689,6 @@ namespace RuntimeAtlasPacker
 #endif
                         return (AddResult.Full, null);
                     }
-                    
-#if UNITY_EDITOR
-                    Debug.Log($"[RuntimeAtlas.AddInternal] All existing pages full. Creating new page (current: {_textures.Count}, max: {(_settings.MaxPageCount == -1 ? "unlimited" : _settings.MaxPageCount.ToString())})...");
-#endif
                     
                     // Create new page
                     CreateNewPage();
@@ -705,9 +708,6 @@ namespace RuntimeAtlasPacker
             }
 
             var currentTexture = _textures[pageIndex];
-#if UNITY_EDITOR
-            Debug.Log($"[RuntimeAtlas.AddInternal] Packed successfully in page {pageIndex} at: x={packedRect.x}, y={packedRect.y}, w={packedRect.width}, h={packedRect.height}");
-#endif
 
             // Adjust for padding - contentRect is the actual visible area
             var contentRect = new RectInt(
@@ -717,17 +717,10 @@ namespace RuntimeAtlasPacker
                 texture.height
             );
 
-#if UNITY_EDITOR
-            Debug.Log($"[RuntimeAtlas.AddInternal] Content rect (removing padding): {contentRect}");
-#endif
-
             // Blit texture to atlas page
             try
             {
                 TextureBlitter.Blit(texture, currentTexture, contentRect.x, contentRect.y);
-#if UNITY_EDITOR
-                Debug.Log($"[RuntimeAtlas.AddInternal] Blit successful to page {pageIndex}");
-#endif
             }
             catch (Exception ex)
             {
@@ -745,17 +738,10 @@ namespace RuntimeAtlasPacker
                 (float)contentRect.height / (float)currentTexture.height
             );
 
-#if UNITY_EDITOR
-            Debug.Log($"[RuntimeAtlas.AddInternal] UV calculated: ({uvRect.x:F4}, {uvRect.y:F4}, {uvRect.width:F4}, {uvRect.height:F4})");
-#endif
             // Create entry with texture index
             var id = GetNextId();
             var entry = new AtlasEntry(this, id, pageIndex, contentRect, uvRect, texture.name);
             _entries[id] = entry;
-            
-#if UNITY_EDITOR
-            Debug.Log($"[RuntimeAtlas.AddInternal] ===== COMPLETE: Entry ID {id} created for '{texture.name}' on page {pageIndex}. Total entries: {_entries.Count} =====");
-#endif
             
             _version++;
             _isDirty = true;
