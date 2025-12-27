@@ -435,41 +435,96 @@ namespace RuntimeAtlasPacker
                 return Array.Empty<AtlasEntry>();
             }
 
-            var profiler = RuntimeAtlasProfiler.Begin("AddBatch", GetAtlasName(), $"{textures.Length} textures");
-
-#if UNITY_EDITOR
-            Debug.Log($"[RuntimeAtlas] AddBatch: Starting batch of {textures.Length} textures");
-#endif
-            
-            var successfulEntries = new List<AtlasEntry>();
-
-            // Sort by area descending for better packing
-            var sorted = new (int index, Texture2D tex, int area)[textures.Length];
+            // Convert to dictionary format and use shared method
+            var textureDict = new Dictionary<string, Texture2D>(textures.Length);
             for (var i = 0; i < textures.Length; i++)
             {
-                sorted[i] = (i, textures[i], textures[i].width * textures[i].height);
+                if (textures[i] != null)
+                {
+                    // Use texture name or index as key
+                    var key = string.IsNullOrEmpty(textures[i].name) ? $"texture_{i}" : textures[i].name;
+                    textureDict[key] = textures[i];
+                }
             }
-            Array.Sort(sorted, (a, b) => b.area.CompareTo(a.area));
+
+            var results = AddBatch(textureDict);
+            return results.Values.ToArray();
+        }
+
+        /// <summary>
+        /// Add multiple textures to the atlas in a single batch with named keys.
+        /// More efficient than adding one at a time.
+        /// Returns a dictionary mapping keys to successfully added entries (skips failures).
+        /// If a texture with the same key already exists, it will be replaced.
+        /// </summary>
+        /// <param name="textures">Dictionary of sprite keys to textures</param>
+        /// <returns>Dictionary mapping keys to successfully added AtlasEntry objects</returns>
+        public Dictionary<string, AtlasEntry> AddBatch(Dictionary<string, Texture2D> textures)
+        {
+            if (_isDisposed)
+            {
+#if UNITY_EDITOR
+                Debug.LogWarning("[RuntimeAtlas.AddBatch] Atlas is disposed");
+#endif
+                return new Dictionary<string, AtlasEntry>();
+            }
+            
+            if (textures == null || textures.Count == 0)
+            {
+#if UNITY_EDITOR
+                Debug.LogWarning("[RuntimeAtlas.AddBatch] No textures provided");
+#endif
+                return new Dictionary<string, AtlasEntry>();
+            }
+
+            var profiler = RuntimeAtlasProfiler.Begin("AddBatch", GetAtlasName(), $"{textures.Count} textures");
+
+#if UNITY_EDITOR
+            Debug.Log($"[RuntimeAtlas] AddBatch: Starting batch of {textures.Count} textures with keys");
+#endif
+
+            // Remove existing entries with same keys
+            foreach (var key in textures.Keys)
+            {
+                if (_entriesByName.TryGetValue(key, out var existingEntry))
+                {
+#if UNITY_EDITOR
+                    Debug.Log($"[RuntimeAtlas] AddBatch: Removing existing entry with key '{key}' (ID: {existingEntry.Id})");
+#endif
+                    RemoveById(existingEntry.Id);
+                }
+            }
+
+            var successfulEntries = new Dictionary<string, AtlasEntry>();
+
+            // Sort by area descending for better packing
+            var sorted = textures
+                .Where(kvp => kvp.Value != null)
+                .Select(kvp => (key: kvp.Key, tex: kvp.Value, area: kvp.Value.width * kvp.Value.height))
+                .OrderByDescending(x => x.area)
+                .ToArray();
 
             // Pack all textures WITHOUT applying after each one
             var successCount = 0;
             var failCount = 0;
-            foreach (var (index, tex, _) in sorted)
+            foreach (var (key, tex, _) in sorted)
             {
                 var (result, entry) = AddInternal(tex);
                 if (result == AddResult.Success && entry != null)
                 {
-                    successfulEntries.Add(entry);
+                    // Store in name dictionary
+                    _entriesByName[key] = entry;
+                    successfulEntries[key] = entry;
                     successCount++;
 #if UNITY_EDITOR
-                    Debug.Log($"[RuntimeAtlas] Batch [{index}]: Added '{tex.name}' -> Entry ID {entry.Id}");
+                    Debug.Log($"[RuntimeAtlas] Batch ['{key}']: Added '{tex.name}' -> Entry ID {entry.Id}");
 #endif
                 }
                 else
                 {
                     failCount++;
 #if UNITY_EDITOR
-                    Debug.LogWarning($"[RuntimeAtlas] Batch [{index}]: Failed to add '{tex.name}' -> Result: {result}");
+                    Debug.LogWarning($"[RuntimeAtlas] Batch ['{key}']: Failed to add '{tex.name}' -> Result: {result}");
 #endif
                     
                     // If atlas is full, stop trying to add more
@@ -513,7 +568,7 @@ namespace RuntimeAtlasPacker
 #endif
 
             RuntimeAtlasProfiler.End(profiler);
-            return successfulEntries.ToArray();
+            return successfulEntries;
         }
         
         /// <summary>
