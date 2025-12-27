@@ -700,7 +700,7 @@ namespace RuntimeAtlasPacker.Editor
             if (GUILayout.Button("Remove Selected Entry"))
             {
                 if (_selectedEntry != null && EditorUtility.DisplayDialog("Remove Entry",
-                    $"Remove entry {_selectedEntry.Id} from atlas?", "Remove", "Cancel"))
+                    $"Remove entry '{_selectedEntry.Name}' (ID: {_selectedEntry.Id}) from atlas?", "Remove", "Cancel"))
                 {
                     _selectedAtlas.Remove(_selectedEntry);
                     _selectedEntry = null;
@@ -835,17 +835,22 @@ namespace RuntimeAtlasPacker.Editor
             foreach (var entry in entries)
             {
                 if (!string.IsNullOrEmpty(_searchString) && 
-                    !entry.Id.ToString().Contains(_searchString))
+                    !entry.Id.ToString().Contains(_searchString) && 
+                    !entry.Name.Contains(_searchString, StringComparison.OrdinalIgnoreCase))
                     continue;
                 
                 bool isSelected = _selectedEntry == entry;
                 
                 EditorGUILayout.BeginHorizontal(isSelected ? "SelectionRect" : "box");
                 
-                if (GUILayout.Button($"Entry {entry.Id}", EditorStyles.label, GUILayout.Width(80)))
+                // Show Entry ID (key)
+                if (GUILayout.Button($"ID: {entry.Id}", EditorStyles.label, GUILayout.Width(60)))
                 {
                     _selectedEntry = entry;
                 }
+                
+                // Show Sprite Name
+                EditorGUILayout.LabelField($"Name: {entry.Name}", GUILayout.Width(150));
                 
                 EditorGUILayout.LabelField($"{entry.Width}x{entry.Height}", GUILayout.Width(70));
                 EditorGUILayout.LabelField($"UV: ({entry.UV.x:F2}, {entry.UV.y:F2})", GUILayout.Width(100));
