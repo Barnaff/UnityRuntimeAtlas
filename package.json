@@ -1,6 +1,6 @@
 {
   "name": "com.barnaff.runtimeatlaspacker",
-  "version": "1.1.0",
+  "version": "1.2.0",
   "displayName": "Runtime Atlas Packer",
   "description": "High-performance runtime texture atlas packing with dynamic updates, Burst compilation, and zero-allocation design. Perfect for dynamic sprite atlasing at runtime.",
   "unity": "2021.3",

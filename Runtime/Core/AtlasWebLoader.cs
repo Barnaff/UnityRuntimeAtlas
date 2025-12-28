@@ -1,0 +1,455 @@
+using System;
+using System.Collections.Generic;
+using System.Linq;
+using System.Threading;
+using System.Threading.Tasks;
+using UnityEngine;
+using UnityEngine.Networking;
+
+namespace RuntimeAtlasPacker
+{
+    /// <summary>
+    /// Fast, optimized system for downloading images from URLs and adding them to an atlas.
+    /// Supports batching, async operations, and request deduplication.
+    /// </summary>
+    public class AtlasWebLoader : IDisposable
+    {
+        private readonly RuntimeAtlas _atlas;
+        private readonly Dictionary<string, LoadRequest> _activeRequests;
+        private readonly Queue<LoadRequest> _pendingQueue;
+        private readonly int _maxConcurrentDownloads;
+        private int _activeDownloads;
+        private bool _isDisposed;
+
+        /// <summary>
+        /// Event fired when a sprite is successfully loaded and added to the atlas.
+        /// </summary>
+        public event Action<string, Sprite> OnSpriteLoaded;
+
+        /// <summary>
+        /// Event fired when a download fails.
+        /// </summary>
+        public event Action<string, string> OnDownloadFailed;
+
+        /// <summary>
+        /// Create a new web loader for the specified atlas.
+        /// </summary>
+        /// <param name="atlas">The atlas to add downloaded images to</param>
+        /// <param name="maxConcurrentDownloads">Maximum number of concurrent downloads (default: 4)</param>
+        public AtlasWebLoader(RuntimeAtlas atlas, int maxConcurrentDownloads = 4)
+        {
+            _atlas = atlas ?? throw new ArgumentNullException(nameof(atlas));
+            _maxConcurrentDownloads = Mathf.Max(1, maxConcurrentDownloads);
+            _activeRequests = new Dictionary<string, LoadRequest>();
+            _pendingQueue = new Queue<LoadRequest>();
+            _activeDownloads = 0;
+            _isDisposed = false;
+        }
+
+        /// <summary>
+        /// Download an image from URL and add it to the atlas, returning the sprite.
+        /// If the same URL is already being downloaded, waits for that download to complete.
+        /// </summary>
+        /// <param name="url">URL of the image to download</param>
+        /// <param name="spriteName">Optional name for the sprite (uses URL hash if null)</param>
+        /// <param name="cancellationToken">Optional cancellation token</param>
+        /// <returns>The sprite from the atlas, or null if download failed</returns>
+        public async Task<Sprite> GetSpriteAsync(string url, string spriteName = null, CancellationToken cancellationToken = default)
+        {
+            if (_isDisposed)
+            {
+                throw new ObjectDisposedException(nameof(AtlasWebLoader));
+            }
+
+            if (string.IsNullOrEmpty(url))
+            {
+                Debug.LogError("[AtlasWebLoader] URL cannot be null or empty");
+                return null;
+            }
+
+            spriteName = string.IsNullOrEmpty(spriteName) ? GetNameFromUrl(url) : spriteName;
+
+            // Check if already in atlas
+            var existingEntry = _atlas.GetEntryByName(spriteName);
+            if (existingEntry != null && existingEntry.IsValid)
+            {
+                return existingEntry.CreateSprite();
+            }
+
+            // Check if already downloading (request deduplication)
+            LoadRequest request;
+            bool shouldStartDownload = false;
+
+            lock (_activeRequests)
+            {
+                if (_activeRequests.TryGetValue(url, out var existingRequest))
+                {
+                    // Use existing request (will wait outside the lock)
+                    request = existingRequest;
+                }
+                else
+                {
+                    // Create new request
+                    request = new LoadRequest(url, spriteName);
+                    _activeRequests[url] = request;
+
+                    // Queue or start download
+                    if (_activeDownloads < _maxConcurrentDownloads)
+                    {
+                        _activeDownloads++;
+                        shouldStartDownload = true;
+                    }
+                    else
+                    {
+                        _pendingQueue.Enqueue(request);
+                    }
+                }
+            }
+
+            // Start download outside the lock if needed
+            if (shouldStartDownload)
+            {
+                _ = ProcessDownloadAsync(request, cancellationToken);
+            }
+
+            // Wait for completion outside the lock
+            return await request.WaitForCompletionAsync(cancellationToken);
+        }
+
+        /// <summary>
+        /// Download multiple images and add them to the atlas in batch.
+        /// More efficient than calling GetSpriteAsync multiple times.
+        /// </summary>
+        /// <param name="urls">URLs of images to download</param>
+        /// <param name="cancellationToken">Optional cancellation token</param>
+        /// <returns>Dictionary mapping URLs to their sprites (null for failed downloads)</returns>
+        public async Task<Dictionary<string, Sprite>> GetSpritesAsync(IEnumerable<string> urls, CancellationToken cancellationToken = default)
+        {
+            if (_isDisposed)
+            {
+                throw new ObjectDisposedException(nameof(AtlasWebLoader));
+            }
+
+            var tasks = new List<Task<(string url, Sprite sprite)>>();
+
+            foreach (var url in urls)
+            {
+                if (!string.IsNullOrEmpty(url))
+                {
+                    tasks.Add(GetSpriteWithUrlAsync(url, cancellationToken));
+                }
+            }
+
+            var results = await Task.WhenAll(tasks);
+
+            var resultDict = new Dictionary<string, Sprite>();
+            foreach (var (url, sprite) in results)
+            {
+                resultDict[url] = sprite;
+            }
+
+            return resultDict;
+        }
+
+        /// <summary>
+        /// Download multiple images and add them as a batch to the atlas.
+        /// Uses batch add for better performance.
+        /// </summary>
+        /// <param name="urlsWithNames">Dictionary of URLs to sprite names</param>
+        /// <param name="cancellationToken">Optional cancellation token</param>
+        /// <returns>Dictionary mapping sprite names to their sprites</returns>
+        public async Task<Dictionary<string, Sprite>> DownloadAndAddBatchAsync(
+            Dictionary<string, string> urlsWithNames, 
+            CancellationToken cancellationToken = default)
+        {
+            if (_isDisposed)
+            {
+                throw new ObjectDisposedException(nameof(AtlasWebLoader));
+            }
+
+            // Download all textures
+            var downloadTasks = new List<Task<(string name, Texture2D texture)>>();
+
+            foreach (var kvp in urlsWithNames)
+            {
+                downloadTasks.Add(DownloadTextureAsync(kvp.Key, kvp.Value, cancellationToken));
+            }
+
+            var downloadedTextures = await Task.WhenAll(downloadTasks);
+
+            // Build batch dictionary
+            var textureBatch = new Dictionary<string, Texture2D>();
+            foreach (var (name, texture) in downloadedTextures)
+            {
+                if (texture != null)
+                {
+                    textureBatch[name] = texture;
+                }
+            }
+
+            // Add all to atlas in one batch (more efficient)
+            var entries = _atlas.AddBatch(textureBatch);
+
+            // Create sprites
+            var results = new Dictionary<string, Sprite>();
+            foreach (var kvp in entries)
+            {
+                if (kvp.Value != null && kvp.Value.IsValid)
+                {
+                    var sprite = kvp.Value.CreateSprite();
+                    
+                    // Verify sprite is valid before adding to results
+                    if (sprite != null && sprite.texture != null)
+                    {
+                        results[kvp.Key] = sprite;
+#if UNITY_EDITOR
+                        Debug.Log($"[AtlasWebLoader] ✓ Batch created sprite '{sprite.name}' - Texture: {sprite.texture.name}");
+#endif
+                    }
+                    else
+                    {
+#if UNITY_EDITOR
+                        Debug.LogWarning($"[AtlasWebLoader] Batch sprite '{kvp.Key}' is invalid - sprite: {sprite != null}, texture: {sprite?.texture != null}");
+#endif
+                    }
+                }
+            }
+
+            // Cleanup downloaded textures
+            foreach (var texture in textureBatch.Values)
+            {
+                if (texture != null)
+                {
+                    UnityEngine.Object.Destroy(texture);
+                }
+            }
+
+            return results;
+        }
+
+        private async Task<(string url, Sprite sprite)> GetSpriteWithUrlAsync(string url, CancellationToken cancellationToken)
+        {
+            var sprite = await GetSpriteAsync(url, null, cancellationToken);
+            return (url, sprite);
+        }
+
+        private async Task<(string name, Texture2D texture)> DownloadTextureAsync(
+            string url, 
+            string name, 
+            CancellationToken cancellationToken)
+        {
+            try
+            {
+                using (var request = UnityWebRequestTexture.GetTexture(url))
+                {
+                    var operation = request.SendWebRequest();
+
+                    // Wait for download to complete
+                    while (!operation.isDone && !cancellationToken.IsCancellationRequested)
+                    {
+                        await Task.Yield();
+                    }
+
+                    if (cancellationToken.IsCancellationRequested)
+                    {
+                        request.Abort();
+                        return (name, null);
+                    }
+
+                    if (request.result == UnityWebRequest.Result.Success)
+                    {
+                        var texture = DownloadHandlerTexture.GetContent(request);
+                        texture.name = name;
+                        return (name, texture);
+                    }
+                    else
+                    {
+                        Debug.LogWarning($"[AtlasWebLoader] Failed to download {url}: {request.error}");
+                        return (name, null);
+                    }
+                }
+            }
+            catch (Exception ex)
+            {
+                Debug.LogError($"[AtlasWebLoader] Exception downloading {url}: {ex.Message}");
+                return (name, null);
+            }
+        }
+
+        private async Task ProcessDownloadAsync(LoadRequest request, CancellationToken cancellationToken)
+        {
+            try
+            {
+                // Download texture
+                using (var webRequest = UnityWebRequestTexture.GetTexture(request.Url))
+                {
+                    var operation = webRequest.SendWebRequest();
+
+                    // Wait for download to complete (non-blocking)
+                    while (!operation.isDone && !cancellationToken.IsCancellationRequested)
+                    {
+                        await Task.Yield();
+                    }
+
+                    if (cancellationToken.IsCancellationRequested)
+                    {
+                        webRequest.Abort();
+                        request.SetFailed("Cancelled");
+                        OnDownloadFailed?.Invoke(request.Url, "Cancelled");
+                        return;
+                    }
+
+                    if (webRequest.result == UnityWebRequest.Result.Success)
+                    {
+                        var texture = DownloadHandlerTexture.GetContent(webRequest);
+                        texture.name = request.SpriteName;
+
+                        // Add to atlas
+                        var (result, entry) = _atlas.Add(request.SpriteName, texture);
+
+                        if (result == AddResult.Success && entry != null && entry.IsValid)
+                        {
+                            var sprite = entry.CreateSprite();
+                            
+                            // Verify sprite is valid
+                            if (sprite != null && sprite.texture != null)
+                            {
+                                request.SetSuccess(sprite);
+                                OnSpriteLoaded?.Invoke(request.Url, sprite);
+#if UNITY_EDITOR
+                                Debug.Log($"[AtlasWebLoader] ✓ Created sprite '{sprite.name}' - Texture: {sprite.texture.name}, Size: {sprite.rect.width}x{sprite.rect.height}");
+#endif
+                            }
+                            else
+                            {
+                                request.SetFailed("Created sprite is invalid (null texture)");
+                                OnDownloadFailed?.Invoke(request.Url, "Invalid sprite");
+#if UNITY_EDITOR
+                                Debug.LogWarning($"[AtlasWebLoader] Created sprite is invalid - sprite: {sprite != null}, texture: {sprite?.texture != null}");
+#endif
+                            }
+                        }
+                        else
+                        {
+                            request.SetFailed($"Failed to add to atlas: {result}");
+                            OnDownloadFailed?.Invoke(request.Url, result.ToString());
+                        }
+
+                        // Cleanup downloaded texture (not the atlas texture!)
+                        UnityEngine.Object.Destroy(texture);
+                    }
+                    else
+                    {
+                        request.SetFailed(webRequest.error);
+                        OnDownloadFailed?.Invoke(request.Url, webRequest.error);
+                    }
+                }
+            }
+            catch (Exception ex)
+            {
+                request.SetFailed(ex.Message);
+                OnDownloadFailed?.Invoke(request.Url, ex.Message);
+            }
+            finally
+            {
+                // Remove from active requests
+                lock (_activeRequests)
+                {
+                    _activeRequests.Remove(request.Url);
+                    _activeDownloads--;
+
+                    // Start next pending download if any
+                    if (_pendingQueue.Count > 0)
+                    {
+                        var nextRequest = _pendingQueue.Dequeue();
+                        _activeDownloads++;
+                        _ = ProcessDownloadAsync(nextRequest, cancellationToken);
+                    }
+                }
+            }
+        }
+
+        private string GetNameFromUrl(string url)
+        {
+            try
+            {
+                var uri = new Uri(url);
+                var filename = System.IO.Path.GetFileNameWithoutExtension(uri.AbsolutePath);
+                return string.IsNullOrEmpty(filename) ? $"Web_{url.GetHashCode():X}" : filename;
+            }
+            catch
+            {
+                return $"Web_{url.GetHashCode():X}";
+            }
+        }
+
+        public void Dispose()
+        {
+            if (_isDisposed)
+            {
+                return;
+            }
+
+            _isDisposed = true;
+
+            // Cancel all pending requests
+            lock (_activeRequests)
+            {
+                foreach (var request in _activeRequests.Values)
+                {
+                    request.SetFailed("Loader disposed");
+                }
+                _activeRequests.Clear();
+                _pendingQueue.Clear();
+            }
+        }
+
+        /// <summary>
+        /// Internal class to track load requests and handle request deduplication.
+        /// </summary>
+        private class LoadRequest
+        {
+            public string Url { get; }
+            public string SpriteName { get; }
+
+            private readonly TaskCompletionSource<Sprite> _completionSource;
+            private bool _isCompleted;
+
+            public LoadRequest(string url, string spriteName)
+            {
+                Url = url;
+                SpriteName = spriteName;
+                _completionSource = new TaskCompletionSource<Sprite>();
+                _isCompleted = false;
+            }
+
+            public async Task<Sprite> WaitForCompletionAsync(CancellationToken cancellationToken)
+            {
+                // Register cancellation
+                using (cancellationToken.Register(() => _completionSource.TrySetCanceled()))
+                {
+                    return await _completionSource.Task;
+                }
+            }
+
+            public void SetSuccess(Sprite sprite)
+            {
+                if (!_isCompleted)
+                {
+                    _isCompleted = true;
+                    _completionSource.TrySetResult(sprite);
+                }
+            }
+
+            public void SetFailed(string error)
+            {
+                if (!_isCompleted)
+                {
+                    _isCompleted = true;
+                    _completionSource.TrySetResult(null);
+                }
+            }
+        }
+    }
+}
+

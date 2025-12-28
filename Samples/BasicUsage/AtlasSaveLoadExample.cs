@@ -5,7 +5,6 @@ using System.IO;
 using System.Threading;
 using System.Threading.Tasks;
 using UnityEngine;
-using UnityEngine.Networking;
 using UnityEngine.UI;
 using UnityEngine.EventSystems;
 
@@ -44,12 +43,12 @@ namespace RuntimeAtlasPacker.Samples
         [SerializeField] private string _savePath = "SavedAtlas";
 
         private RuntimeAtlas _atlas;
+        private AtlasWebLoader _webLoader;
         private string _fullSavePath;
         private Transform _imageContainer;
         private Canvas _canvas;
         private ScrollRect _scrollRect;
         private Text _statusText;
-        private List<Texture2D> _downloadedTextures = new List<Texture2D>();
         private CancellationTokenSource _cts;
 
         private void Start()
@@ -209,11 +208,23 @@ namespace RuntimeAtlasPacker.Samples
 
         private IEnumerator RunExample()
         {
-            // Step 1: Download initial images
-            UpdateStatus($"Step 1: Downloading {_initialImageCount} images...");
-            yield return StartCoroutine(DownloadRandomImages(_initialImageCount));
+            // Step 1: Create atlas first
+            UpdateStatus("Step 1: Creating empty atlas...");
+            CreateEmptyAtlas();
+            yield return new WaitForSeconds(_stepDelay);
+
+            // Step 2: Download and add initial images using AtlasWebLoader
+            UpdateStatus($"Step 2: Downloading and adding {_initialImageCount} images...");
+            var downloadTask = DownloadAndAddImagesAsync(_initialImageCount);
+            yield return new WaitUntil(() => downloadTask.IsCompleted);
             
-            if (_downloadedTextures.Count == 0)
+            if (downloadTask.Exception != null)
+            {
+                UpdateStatus($"ERROR: {downloadTask.Exception.GetBaseException().Message}");
+                yield break;
+            }
+            
+            if (_atlas.EntryCount == 0)
             {
                 UpdateStatus("ERROR: Failed to download any images!");
                 yield break;
@@ -221,13 +232,8 @@ namespace RuntimeAtlasPacker.Samples
             
             yield return new WaitForSeconds(_stepDelay);
 
-            // Step 2: Create atlas and add initial textures
-            UpdateStatus("Step 2: Creating atlas...");
-            CreateAtlasWithTextures(_downloadedTextures);
-            yield return new WaitForSeconds(_stepDelay);
-
             // Step 3: Display initial sprites
-            UpdateStatus("Step 3: Displaying sprites...");
+            UpdateStatus($"Step 3: Displaying {_atlas.EntryCount} sprites...");
             DisplayAllSprites();
             yield return new WaitForSeconds(_stepDelay);
 
@@ -247,80 +253,69 @@ namespace RuntimeAtlasPacker.Samples
             yield return new WaitForSeconds(_stepDelay);
 
             // Step 7: Display loaded sprites
-            UpdateStatus("Step 7: Displaying loaded sprites...");
+            UpdateStatus($"Step 7: Displaying {_atlas.EntryCount} loaded sprites...");
             DisplayAllSprites();
             yield return new WaitForSeconds(_stepDelay);
 
-            // Step 8: Download additional images
+            // Step 8: Download and add additional images
             UpdateStatus($"Step 8: Downloading {_additionalImageCount} more images...");
-            var additionalTextures = new List<Texture2D>();
-            yield return StartCoroutine(DownloadRandomImages(_additionalImageCount, additionalTextures));
+            var additionalTask = DownloadAndAddImagesAsync(_additionalImageCount);
+            yield return new WaitUntil(() => additionalTask.IsCompleted);
+            
+            if (additionalTask.Exception != null)
+            {
+                UpdateStatus($"ERROR: {additionalTask.Exception.GetBaseException().Message}");
+            }
+            
             yield return new WaitForSeconds(_stepDelay);
 
-            // Step 9: Add new textures to loaded atlas
-            UpdateStatus("Step 9: Adding new images to atlas...");
-            AddTexturesToAtlas(additionalTextures);
-            yield return new WaitForSeconds(_stepDelay);
-
-            // Step 10: Display all sprites (original + new)
-            UpdateStatus("Step 10: Displaying all sprites...");
+            // Step 9: Display all sprites (original + new)
+            UpdateStatus($"Step 9: Displaying all {_atlas.EntryCount} sprites...");
             DisplayAllSprites();
             yield return new WaitForSeconds(_stepDelay);
 
-            // Step 11: Save updated atlas
-            UpdateStatus("Step 11: Saving updated atlas...");
+            // Step 10: Save updated atlas
+            UpdateStatus("Step 10: Saving updated atlas...");
             SaveAtlas();
             yield return new WaitForSeconds(_stepDelay);
 
             UpdateStatus($"✓ Complete! {_atlas.EntryCount} entries, {_atlas.PageCount} page(s)");
         }
 
-        private IEnumerator DownloadRandomImages(int count, List<Texture2D> targetList = null)
+        private async Task DownloadAndAddImagesAsync(int count)
         {
-            if (targetList == null)
-            {
-                targetList = _downloadedTextures;
-            }
+            LogDebug($"Downloading and adding {count} random images using AtlasWebLoader...");
 
-            LogDebug($"Downloading {count} random images from picsum.photos...");
-            var downloadedCount = 0;
-
+            // Generate URLs with names
+            var urlsWithNames = new Dictionary<string, string>();
             for (var i = 0; i < count; i++)
             {
                 var size = _imageSize + UnityEngine.Random.Range(-_imageSizeVariation, _imageSizeVariation + 1);
                 size = Mathf.Clamp(size, 64, 512);
                 var randomIndex = UnityEngine.Random.Range(1, 99999);
                 var url = $"https://picsum.photos/{size}/{size}?random={randomIndex}";
-
-                UpdateStatus($"Downloading image {i + 1}/{count} ({size}x{size})...");
-
-                using (var request = UnityWebRequestTexture.GetTexture(url))
-                {
-                    yield return request.SendWebRequest();
-
-                    if (request.result == UnityWebRequest.Result.Success)
-                    {
-                        var texture = DownloadHandlerTexture.GetContent(request);
-                        texture.name = $"RandomImage_{downloadedCount}_{size}x{size}";
-                        targetList.Add(texture);
-                        downloadedCount++;
-                        LogDebug($"✓ Downloaded: {texture.name}");
-                    }
-                    else
-                    {
-                        LogDebug($"✗ Failed to download: {request.error}");
-                    }
-                }
-
-                // Small delay between downloads to avoid rate limiting
-                yield return new WaitForSeconds(0.2f);
+                var imageName = $"RandomImage_{i}_{size}x{size}";
+                
+                urlsWithNames[url] = imageName;
             }
 
-            UpdateStatus($"Downloaded {downloadedCount}/{count} images");
-            LogDebug($"Successfully downloaded {downloadedCount}/{count} images");
+            // Use AtlasWebLoader to download and add all images in batch
+            try
+            {
+                var entries = await _atlas.DownloadAndAddBatchAsync(urlsWithNames, maxConcurrentDownloads: 4, _cts.Token);
+                
+                var successCount = entries.Count;
+                LogDebug($"✓ Successfully downloaded and added {successCount}/{count} images");
+                UpdateStatus($"Downloaded and added {successCount}/{count} images");
+            }
+            catch (Exception ex)
+            {
+                LogDebug($"✗ Error downloading images: {ex.Message}");
+                UpdateStatus($"Error: {ex.Message}");
+            }
         }
 
-        private void CreateAtlasWithTextures(List<Texture2D> textures)
+        private void CreateEmptyAtlas()
         {
             var settings = new AtlasSettings
             {
@@ -339,44 +334,9 @@ namespace RuntimeAtlasPacker.Samples
             };
 
             _atlas = new RuntimeAtlas(settings);
+            _atlas.DebugName = "SaveLoadExample_Atlas";
 
-            var texDict = new Dictionary<string, Texture2D>();
-            for (var i = 0; i < textures.Count; i++)
-            {
-                if (textures[i] != null)
-                {
-                    texDict[textures[i].name] = textures[i];
-                }
-            }
-
-            var results = _atlas.AddBatch(texDict);
-            Debug.Log($"[AtlasSaveLoadExample] Created atlas with {results.Count} textures");
-        }
-
-        private void AddTexturesToAtlas(List<Texture2D> textures)
-        {
-            if (_atlas == null)
-            {
-                Debug.LogError("[AtlasSaveLoadExample] No atlas to add textures to!");
-                return;
-            }
-
-            if (textures == null || textures.Count == 0)
-            {
-                return;
-            }
-
-            var texDict = new Dictionary<string, Texture2D>();
-            for (var i = 0; i < textures.Count; i++)
-            {
-                if (textures[i] != null)
-                {
-                    texDict[textures[i].name] = textures[i];
-                }
-            }
-
-            var results = _atlas.AddBatch(texDict);
-            Debug.Log($"[AtlasSaveLoadExample] Added {results.Count} textures to atlas");
+            LogDebug("Created empty atlas");
         }
 
         private void SaveAtlas()
@@ -498,15 +458,7 @@ namespace RuntimeAtlasPacker.Samples
             _cts?.Cancel();
             _cts?.Dispose();
             
-            // Cleanup downloaded textures
-            foreach (var texture in _downloadedTextures)
-            {
-                if (texture != null)
-                {
-                    Destroy(texture);
-                }
-            }
-            _downloadedTextures.Clear();
+            _webLoader?.Dispose();
             
             if (_atlas != null)
             {
@@ -519,7 +471,7 @@ namespace RuntimeAtlasPacker.Samples
 
         // Editor buttons for testing
 #if UNITY_EDITOR
-        [ContextMenu("Download and Create Atlas")]
+        [ContextMenu("Create Atlas and Download Images")]
         private void EditorDownloadAndCreate()
         {
             if (!Application.isPlaying)
@@ -528,8 +480,15 @@ namespace RuntimeAtlasPacker.Samples
                 return;
             }
             
-            _downloadedTextures.Clear();
-            StartCoroutine(DownloadRandomImages(_initialImageCount));
+            StartCoroutine(EditorRunDownload());
+        }
+
+        private IEnumerator EditorRunDownload()
+        {
+            CreateEmptyAtlas();
+            var task = DownloadAndAddImagesAsync(_initialImageCount);
+            yield return new WaitUntil(() => task.IsCompleted);
+            DisplayAllSprites();
         }
 
         [ContextMenu("Save Current Atlas")]

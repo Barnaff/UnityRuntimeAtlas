@@ -206,7 +206,9 @@ namespace RuntimeAtlasPacker
                 return (AddResult.InvalidTexture, null);
             }
 
+#if UNITY_EDITOR
             var profiler = RuntimeAtlasProfiler.Begin("Add", GetAtlasName(), $"{texture.name} ({texture.width}x{texture.height})");
+#endif
 
 #if UNITY_EDITOR
             Debug.Log($"[RuntimeAtlas] Add: Packing '{texture.name}': {texture.width}x{texture.height}");
@@ -219,8 +221,8 @@ namespace RuntimeAtlasPacker
             {
 #if UNITY_EDITOR
                 Debug.LogWarning($"[RuntimeAtlas] Add: Failed with result: {result}");
-#endif
                 RuntimeAtlasProfiler.End(profiler);
+#endif
                 return (result, null);
             }
             
@@ -246,9 +248,8 @@ namespace RuntimeAtlasPacker
             
 #if UNITY_EDITOR
             Debug.Log($"[RuntimeAtlas] Add: Complete. Entry ID: {entry.Id}, Page: {entry.TextureIndex}, Total entries: {_entries.Count}");
-#endif
-
             RuntimeAtlasProfiler.End(profiler);
+#endif
             return (AddResult.Success, entry);
         }
 
@@ -284,7 +285,9 @@ namespace RuntimeAtlasPacker
                 return (AddResult.InvalidTexture, null);
             }
 
+#if UNITY_EDITOR
             var profiler = RuntimeAtlasProfiler.Begin("Add", GetAtlasName(), $"{texture.name} ({texture.width}x{texture.height})");
+#endif
 
             // Use internal method for packing
             var (result, entry) = AddInternal(texture, border, pivot, pixelsPerUnit);
@@ -293,8 +296,8 @@ namespace RuntimeAtlasPacker
             {
 #if UNITY_EDITOR
                 Debug.LogWarning($"[RuntimeAtlas] Add: Failed with result: {result}");
-#endif
                 RuntimeAtlasProfiler.End(profiler);
+#endif
                 return (result, null);
             }
             
@@ -317,7 +320,9 @@ namespace RuntimeAtlasPacker
 
             ValidateNoOverlaps();
 
+#if UNITY_EDITOR
             RuntimeAtlasProfiler.End(profiler);
+#endif
             return (AddResult.Success, entry);
         }
 
@@ -515,7 +520,9 @@ namespace RuntimeAtlasPacker
                 return new Dictionary<string, AtlasEntry>();
             }
 
+#if UNITY_EDITOR
             var profiler = RuntimeAtlasProfiler.Begin("AddBatch", GetAtlasName(), $"{textures.Count} textures");
+#endif
 
 #if UNITY_EDITOR
             Debug.Log($"[RuntimeAtlas] AddBatch: Starting batch of {textures.Count} textures with keys");
@@ -624,10 +631,152 @@ namespace RuntimeAtlasPacker
             
 #if UNITY_EDITOR
             Debug.Log($"[RuntimeAtlas] AddBatch: Complete. Added: {successCount}, Failed: {failCount}, Total entries in atlas: {_entries.Count}");
+            RuntimeAtlasProfiler.End(profiler);
 #endif
 
-            RuntimeAtlasProfiler.End(profiler);
             return successfulEntries;
+        }
+
+        /// <summary>
+        /// Download images from remote URLs and add them as a batch to the atlas.
+        /// This is an optimized method that downloads concurrently and adds all textures in one batch operation.
+        /// </summary>
+        /// <param name="urls">List of URLs to download images from</param>
+        /// <param name="maxConcurrentDownloads">Maximum number of concurrent downloads (default: 4)</param>
+        /// <param name="cancellationToken">Optional cancellation token</param>
+        /// <returns>Dictionary mapping URLs to their atlas entries (null for failed downloads)</returns>
+        public async Task<Dictionary<string, AtlasEntry>> DownloadAndAddBatchAsync(
+            IEnumerable<string> urls, 
+            int maxConcurrentDownloads = 4,
+            CancellationToken cancellationToken = default)
+        {
+            if (urls == null)
+            {
+#if UNITY_EDITOR
+                Debug.LogWarning("[RuntimeAtlas.DownloadAndAddBatchAsync] URLs collection is null");
+#endif
+                return new Dictionary<string, AtlasEntry>();
+            }
+
+            var urlList = urls.ToList();
+            if (urlList.Count == 0)
+            {
+                return new Dictionary<string, AtlasEntry>();
+            }
+
+            // Create temporary web loader
+            using (var webLoader = new AtlasWebLoader(this, maxConcurrentDownloads))
+            {
+                var results = await webLoader.GetSpritesAsync(urlList, cancellationToken);
+                
+                // Convert sprites to entries
+                var entries = new Dictionary<string, AtlasEntry>();
+                foreach (var kvp in results)
+                {
+                    if (kvp.Value != null)
+                    {
+                        // Get entry by sprite name
+                        var entry = GetEntryByName(kvp.Value.name);
+                        if (entry != null)
+                        {
+                            entries[kvp.Key] = entry;
+                        }
+                    }
+                }
+                
+                return entries;
+            }
+        }
+
+        /// <summary>
+        /// Download images from remote URLs with custom keys and add them as a batch to the atlas.
+        /// This is the most optimized method for bulk downloads with named entries.
+        /// </summary>
+        /// <param name="urlsWithKeys">Dictionary mapping URLs to custom entry keys/names</param>
+        /// <param name="maxConcurrentDownloads">Maximum number of concurrent downloads (default: 4)</param>
+        /// <param name="cancellationToken">Optional cancellation token</param>
+        /// <returns>Dictionary mapping keys to their atlas entries (null for failed downloads)</returns>
+        public async Task<Dictionary<string, AtlasEntry>> DownloadAndAddBatchAsync(
+            Dictionary<string, string> urlsWithKeys,
+            int maxConcurrentDownloads = 4,
+            CancellationToken cancellationToken = default)
+        {
+            if (urlsWithKeys == null || urlsWithKeys.Count == 0)
+            {
+#if UNITY_EDITOR
+                Debug.LogWarning("[RuntimeAtlas.DownloadAndAddBatchAsync] URLs dictionary is null or empty");
+#endif
+                return new Dictionary<string, AtlasEntry>();
+            }
+
+#if UNITY_EDITOR
+            var profiler = RuntimeAtlasProfiler.Begin("DownloadAndAddBatchAsync", GetAtlasName(), $"{urlsWithKeys.Count} URLs");
+#endif
+
+#if UNITY_EDITOR
+            Debug.Log($"[RuntimeAtlas] DownloadAndAddBatchAsync: Starting download of {urlsWithKeys.Count} images");
+#endif
+
+            // Create temporary web loader
+            using (var webLoader = new AtlasWebLoader(this, maxConcurrentDownloads))
+            {
+                // Download all images with custom keys
+                var results = await webLoader.DownloadAndAddBatchAsync(urlsWithKeys, cancellationToken);
+                
+                // Convert sprites to entries
+                var entries = new Dictionary<string, AtlasEntry>();
+                foreach (var kvp in results)
+                {
+                    if (kvp.Value != null)
+                    {
+                        // Get entry by name (the key we provided)
+                        var entry = GetEntryByName(kvp.Key);
+                        if (entry != null && entry.IsValid)
+                        {
+                            entries[kvp.Key] = entry;
+                        }
+                    }
+                }
+
+#if UNITY_EDITOR
+                Debug.Log($"[RuntimeAtlas] DownloadAndAddBatchAsync: Complete. Added {entries.Count}/{urlsWithKeys.Count} entries");
+                RuntimeAtlasProfiler.End(profiler);
+#endif
+
+                return entries;
+            }
+        }
+
+        /// <summary>
+        /// Download a single image from a remote URL and add it to the atlas.
+        /// For multiple images, use DownloadAndAddBatchAsync for better performance.
+        /// </summary>
+        /// <param name="url">URL to download image from</param>
+        /// <param name="key">Optional custom key/name for the entry (uses URL hash if null)</param>
+        /// <param name="cancellationToken">Optional cancellation token</param>
+        /// <returns>Atlas entry for the downloaded image, or null if failed</returns>
+        public async Task<AtlasEntry> DownloadAndAddAsync(
+            string url,
+            string key = null,
+            CancellationToken cancellationToken = default)
+        {
+            if (string.IsNullOrEmpty(url))
+            {
+#if UNITY_EDITOR
+                Debug.LogWarning("[RuntimeAtlas.DownloadAndAddAsync] URL is null or empty");
+#endif
+                return null;
+            }
+
+            // Use single-item batch for consistency
+            var urlsWithKeys = new Dictionary<string, string>
+            {
+                [url] = key ?? $"Remote_{url.GetHashCode():X8}"
+            };
+
+            var results = await DownloadAndAddBatchAsync(urlsWithKeys, maxConcurrentDownloads: 1, cancellationToken);
+            
+            return results.Values.FirstOrDefault();
         }
         
         /// <summary>
@@ -1065,7 +1214,9 @@ namespace RuntimeAtlasPacker
                 return false;
             }
 
+#if UNITY_EDITOR
             var profiler = RuntimeAtlasProfiler.Begin("Remove", GetAtlasName(), $"Entry ID: {id}");
+#endif
 
             var fullRect = new RectInt(
                 entry.Rect.x - _settings.Padding,
@@ -1103,7 +1254,9 @@ namespace RuntimeAtlasPacker
             _version++;
             _isDirty = true;
 
+#if UNITY_EDITOR
             RuntimeAtlasProfiler.End(profiler);
+#endif
             
             return true;
         }
