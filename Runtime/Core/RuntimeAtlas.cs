@@ -13,6 +13,18 @@ namespace RuntimeAtlasPacker
     /// </summary>
     public sealed class RuntimeAtlas : IDisposable
     {
+        // Global atlas registry for debugging/tools
+        private static readonly List<RuntimeAtlas> _allAtlases = new List<RuntimeAtlas>();
+        private static int _nextRegistryId = 1;
+        
+        /// <summary>Get all active runtime atlases (for debugging/tools).</summary>
+        public static IReadOnlyList<RuntimeAtlas> GetAllAtlases()
+        {
+            // Clean up disposed atlases
+            _allAtlases.RemoveAll(a => a == null || a._isDisposed);
+            return _allAtlases.AsReadOnly();
+        }
+        
         // Multi-page texture support
         private List<Texture2D> _textures;
         private List<IPackingAlgorithm> _packers;
@@ -26,6 +38,8 @@ namespace RuntimeAtlasPacker
         private bool _isDisposed;
         private bool _isDirty;
         private int _version;
+        private int _registryId; // Unique ID for this atlas instance
+        private string _debugName; // Name for debugging
 
         /// <summary>The primary atlas texture (page 0).</summary>
         public Texture2D Texture => _textures != null && _textures.Count > 0 ? _textures[0] : null;
@@ -75,6 +89,13 @@ namespace RuntimeAtlasPacker
 
         /// <summary>Settings used for this atlas.</summary>
         public AtlasSettings Settings => _settings;
+        
+        /// <summary>Debug name for this atlas (for tools/debugging).</summary>
+        public string DebugName
+        {
+            get => _debugName;
+            set => _debugName = string.IsNullOrEmpty(value) ? $"Atlas_{_registryId}" : value;
+        }
 
         /// <summary>Event fired when the atlas texture is resized or recreated.</summary>
         public event Action<RuntimeAtlas> OnAtlasResized;
@@ -107,8 +128,17 @@ namespace RuntimeAtlasPacker
             _packers = new List<IPackingAlgorithm>();
             _currentPageIndex = 0;
             
+            // Register in global registry for debugging
+            _registryId = _nextRegistryId++;
+            _debugName = $"Atlas_{_registryId}";
+            _allAtlases.Add(this);
+            
             // Create first page
             CreateNewPage();
+            
+#if UNITY_EDITOR
+            Debug.Log($"[RuntimeAtlas] Created new atlas '{_debugName}' with ID {_registryId}");
+#endif
         }
 
         private void CreateNewPage()
@@ -1124,6 +1154,46 @@ namespace RuntimeAtlasPacker
         }
 
         /// <summary>
+        /// Save this atlas to disk at the specified path.
+        /// </summary>
+        /// <param name="filePath">Path to save the atlas (without extension)</param>
+        /// <returns>True if successful</returns>
+        public bool Save(string filePath)
+        {
+            return AtlasPersistence.SaveAtlas(this, filePath);
+        }
+
+        /// <summary>
+        /// Save this atlas to disk asynchronously at the specified path.
+        /// </summary>
+        /// <param name="filePath">Path to save the atlas (without extension)</param>
+        /// <returns>Task that completes with true if successful</returns>
+        public System.Threading.Tasks.Task<bool> SaveAsync(string filePath)
+        {
+            return AtlasPersistence.SaveAtlasAsync(this, filePath);
+        }
+
+        /// <summary>
+        /// Load an atlas from disk.
+        /// </summary>
+        /// <param name="filePath">Path to the atlas file (without extension)</param>
+        /// <returns>The loaded atlas, or null if failed</returns>
+        public static RuntimeAtlas Load(string filePath)
+        {
+            return AtlasPersistence.LoadAtlas(filePath);
+        }
+
+        /// <summary>
+        /// Load an atlas from disk asynchronously.
+        /// </summary>
+        /// <param name="filePath">Path to the atlas file (without extension)</param>
+        /// <returns>Task that completes with the loaded atlas, or null if failed</returns>
+        public static System.Threading.Tasks.Task<RuntimeAtlas> LoadAsync(string filePath)
+        {
+            return AtlasPersistence.LoadAtlasAsync(filePath);
+        }
+
+        /// <summary>
         /// Force a full repack of the atlas.
         /// Useful after many removes to reclaim fragmented space.
         /// </summary>
@@ -1292,6 +1362,9 @@ namespace RuntimeAtlasPacker
             }
 
             _isDisposed = true;
+            
+            // Remove from global registry
+            _allAtlases.Remove(this);
 
             try
             {

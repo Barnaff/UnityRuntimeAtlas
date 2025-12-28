@@ -207,6 +207,24 @@ namespace RuntimeAtlasPacker.Editor
             
             try
             {
+                // NEW: Get all atlases from global registry
+                var allAtlases = RuntimeAtlas.GetAllAtlases();
+                if (allAtlases != null)
+                {
+                    Debug.Log($"[AtlasDebugWindow] Found {allAtlases.Count} atlases in global registry");
+                    foreach (var atlas in allAtlases)
+                    {
+                        if (atlas != null)
+                        {
+                            var name = atlas.DebugName ?? $"Atlas_{result.Count}";
+                            result[name] = atlas;
+                            bool hasTexture = atlas.Texture != null;
+                            Debug.Log($"[AtlasDebugWindow] Found atlas '{name}': {(hasTexture ? atlas.Width.ToString() : "?")}x{(hasTexture ? atlas.Height.ToString() : "?")}, {atlas.EntryCount} entries");
+                        }
+                    }
+                }
+                
+                // FALLBACK: Try to get atlases from AtlasPacker (for backwards compatibility)
                 var type = typeof(AtlasPacker);
                 
                 // Get default atlas
@@ -214,21 +232,11 @@ namespace RuntimeAtlasPacker.Editor
                 if (defaultField != null)
                 {
                     var defaultAtlas = defaultField.GetValue(null) as RuntimeAtlas;
-                    if (defaultAtlas != null)
+                    if (defaultAtlas != null && !result.ContainsValue(defaultAtlas))
                     {
-                        result["[Default]"] = defaultAtlas;
-                        // Safely check if texture exists before accessing properties that might throw
-                        bool hasTexture = defaultAtlas.Texture != null;
-                        Debug.Log($"[AtlasDebugWindow] Found default atlas: {(hasTexture ? defaultAtlas.Width.ToString() : "?")}x{(hasTexture ? defaultAtlas.Height.ToString() : "?")}, {defaultAtlas.EntryCount} entries, Texture={(hasTexture ? "Yes" : "No")}");
+                        result["[Default AtlasPacker]"] = defaultAtlas;
+                        Debug.Log($"[AtlasDebugWindow] Found default AtlasPacker atlas");
                     }
-                    else
-                    {
-                        Debug.Log("[AtlasDebugWindow] Default atlas field found but value is null");
-                    }
-                }
-                else
-                {
-                    Debug.LogWarning("[AtlasDebugWindow] Could not find _defaultAtlas field");
                 }
                 
                 // Get named atlases
@@ -238,14 +246,13 @@ namespace RuntimeAtlasPacker.Editor
                     var namedAtlases = namedField.GetValue(null) as Dictionary<string, RuntimeAtlas>;
                     if (namedAtlases != null)
                     {
-                        Debug.Log($"[AtlasDebugWindow] Found {namedAtlases.Count} named atlases");
+                        Debug.Log($"[AtlasDebugWindow] Found {namedAtlases.Count} named AtlasPacker atlases");
                         foreach (var kvp in namedAtlases)
                         {
-                            if (kvp.Value != null)
+                            if (kvp.Value != null && !result.ContainsValue(kvp.Value))
                             {
                                 result[kvp.Key] = kvp.Value;
-                                bool hasTexture = kvp.Value.Texture != null;
-                                Debug.Log($"[AtlasDebugWindow] Found named atlas '{kvp.Key}': {(hasTexture ? kvp.Value.Width.ToString() : "?")}x{(hasTexture ? kvp.Value.Height.ToString() : "?")}, {kvp.Value.EntryCount} entries");
+                                Debug.Log($"[AtlasDebugWindow] Found named AtlasPacker atlas '{kvp.Key}'");
                             }
                         }
                     }
@@ -365,11 +372,20 @@ namespace RuntimeAtlasPacker.Editor
 
         private string GetAtlasName(RuntimeAtlas atlas)
         {
+            if (atlas == null)
+                return "None";
+                
+            // Check cache first
             foreach (var info in _atlasInfoCache)
             {
                 if (info.Atlas == atlas)
                     return info.Name;
             }
+            
+            // Use DebugName if available
+            if (!string.IsNullOrEmpty(atlas.DebugName))
+                return atlas.DebugName;
+            
             return "Unknown";
         }
 
