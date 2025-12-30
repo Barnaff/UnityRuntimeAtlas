@@ -74,9 +74,9 @@ namespace RuntimeAtlasPacker
                         }
                     }
 
-                    // Save metadata as JSON (now much smaller without texture data!)
+                    // Save metadata as JSON (compact format without whitespace for smaller file size)
                     var jsonPath = $"{filePath}.json";
-                    var json = JsonUtility.ToJson(data, true);
+                    var json = JsonUtility.ToJson(data, false);
                     File.WriteAllText(jsonPath, json);
 
 #if UNITY_EDITOR
@@ -135,8 +135,8 @@ namespace RuntimeAtlasPacker
                     }
                 }
 
-                // Serialize JSON on main thread
-                var json = JsonUtility.ToJson(data, true);
+                // Serialize JSON on main thread (compact format without whitespace)
+                var json = JsonUtility.ToJson(data, false);
 
                 // Write files asynchronously (background thread)
                 await Task.Run(() =>
