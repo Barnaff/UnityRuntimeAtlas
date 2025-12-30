@@ -213,7 +213,7 @@ namespace RuntimeAtlasPacker
                 }
 
                 // Deserialize into RuntimeAtlas
-                var atlas = DeserializeAtlas(data);
+                var atlas = DeserializeAtlas(data, filePath);
 
                 // Set source file path for debugging
                 if (atlas != null)
@@ -298,8 +298,8 @@ namespace RuntimeAtlasPacker
                     return null;
                 }
 
-                // Deserialize into RuntimeAtlas (on main thread)
-                var atlas = DeserializeAtlas(data);
+                // Deserialize into RuntimeAtlas (on main thread) using pre-loaded PNG data
+                var atlas = DeserializeAtlasFromData(data, pngDataList);
 
                 // Set source file path for debugging
                 if (atlas != null)
