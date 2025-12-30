@@ -100,18 +100,15 @@ namespace RuntimeAtlasPacker
         public static Action<ProfileData> EditorProfilerBridge;
 #else
         // Stub methods for non-editor builds
-        [System.Diagnostics.Conditional("UNITY_EDITOR")]
         public static ProfileSession Begin(string operationType, string atlasName = null, string details = null)
         {
             return default;
         }
 
-        [System.Diagnostics.Conditional("UNITY_EDITOR")]
         public static void End(ProfileSession session)
         {
         }
 
-        [System.Diagnostics.Conditional("UNITY_EDITOR")]
         public static void Log(string operationType, double durationMs, string atlasName = null, string details = null)
         {
         }
