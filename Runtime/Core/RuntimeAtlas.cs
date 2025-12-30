@@ -375,6 +375,151 @@ namespace RuntimeAtlasPacker
         }
 
         /// <summary>
+        /// Replace an existing entry with a new texture.
+        /// If the entry doesn't exist, it will be added instead.
+        /// </summary>
+        /// <param name="name">The name of the entry to replace</param>
+        /// <param name="texture">The new texture</param>
+        /// <returns>A tuple containing the result status and an AtlasEntry reference</returns>
+        public (AddResult result, AtlasEntry entry) Replace(string name, Texture2D texture)
+        {
+            if (string.IsNullOrEmpty(name))
+            {
+#if UNITY_EDITOR
+                Debug.LogWarning("[RuntimeAtlas.Replace] Null or empty name provided");
+#endif
+                return (AddResult.InvalidTexture, null);
+            }
+
+            bool hadExisting = ContainsName(name);
+            
+            // Use Add with name - it already handles replacement
+            var (result, entry) = Add(name, texture);
+
+#if UNITY_EDITOR
+            if (result == AddResult.Success)
+            {
+                if (hadExisting)
+                {
+                    Debug.Log($"[RuntimeAtlas.Replace] Replaced existing entry '{name}'");
+                }
+                else
+                {
+                    Debug.Log($"[RuntimeAtlas.Replace] Added new entry '{name}' (didn't exist before)");
+                }
+            }
+#endif
+
+            return (result, entry);
+        }
+
+        /// <summary>
+        /// Replace an existing entry with a new texture using sprite properties.
+        /// If the entry doesn't exist, it will be added instead.
+        /// </summary>
+        /// <param name="name">The name of the entry to replace</param>
+        /// <param name="texture">The new texture</param>
+        /// <param name="border">Border values for 9-slicing</param>
+        /// <param name="pivot">Pivot point of the sprite</param>
+        /// <param name="pixelsPerUnit">Pixels per unit value</param>
+        /// <returns>A tuple containing the result status and an AtlasEntry reference</returns>
+        public (AddResult result, AtlasEntry entry) Replace(string name, Texture2D texture, Vector4 border, Vector2 pivot, float pixelsPerUnit = 100f)
+        {
+            if (string.IsNullOrEmpty(name))
+            {
+#if UNITY_EDITOR
+                Debug.LogWarning("[RuntimeAtlas.Replace] Null or empty name provided");
+#endif
+                return (AddResult.InvalidTexture, null);
+            }
+
+            // Remove existing if present
+            if (_entriesByName.TryGetValue(name, out var existingEntry))
+            {
+                RemoveById(existingEntry.Id);
+            }
+
+            // Add with sprite properties
+            var (result, entry) = Add(texture, border, pivot, pixelsPerUnit);
+
+            if (result == AddResult.Success && entry != null)
+            {
+                _entriesByName[name] = entry;
+            }
+
+            return (result, entry);
+        }
+
+        /// <summary>
+        /// Remove multiple entries by their names.
+        /// </summary>
+        /// <param name="names">Collection of names to remove</param>
+        /// <returns>Number of entries successfully removed</returns>
+        public int RemoveByNames(IEnumerable<string> names)
+        {
+            if (names == null)
+            {
+                return 0;
+            }
+
+            int removedCount = 0;
+            foreach (var name in names)
+            {
+                if (RemoveByName(name))
+                {
+                    removedCount++;
+                }
+            }
+
+            return removedCount;
+        }
+
+        /// <summary>
+        /// Clear all entries from the atlas.
+        /// </summary>
+        public void Clear()
+        {
+            // Dispose all entries
+            foreach (var entry in _entries.Values)
+            {
+                entry?.Dispose();
+            }
+
+            _entries.Clear();
+            _entriesByName.Clear();
+            _recycledIds.Clear();
+
+            // Reset all packers
+            for (int i = 0; i < _packers.Count; i++)
+            {
+                if (_packers[i] != null)
+                {
+                    // Reinitialize packers with current size
+                    var size = _textures[i] != null ? _textures[i].width : _settings.InitialSize;
+                    _packers[i].Initialize(size, size);
+                }
+            }
+
+            // Clear all textures
+            for (int i = 0; i < _textures.Count; i++)
+            {
+                if (_textures[i] != null && _settings.Readable)
+                {
+                    var clearPixels = new Color32[_textures[i].width * _textures[i].height];
+                    _textures[i].SetPixels32(clearPixels);
+                    _textures[i].Apply(false, false);
+                }
+            }
+
+            _version++;
+            _isDirty = false;
+
+#if UNITY_EDITOR
+            Debug.Log($"[RuntimeAtlas] Cleared all entries from atlas '{GetAtlasName()}'");
+#endif
+        }
+
+        /// <summary>
         /// Get an entry by name.
         /// </summary>
         /// <param name="name">The name of the entry to retrieve</param>
@@ -1202,6 +1347,26 @@ namespace RuntimeAtlasPacker
             }
 
             return RemoveById(entry.Id);
+        }
+
+        /// <summary>
+        /// Remove an entry by its name.
+        /// </summary>
+        /// <param name="name">The name of the entry to remove</param>
+        /// <returns>True if the entry was found and removed, false otherwise</returns>
+        public bool RemoveByName(string name)
+        {
+            if (string.IsNullOrEmpty(name))
+            {
+                return false;
+            }
+
+            if (_entriesByName.TryGetValue(name, out var entry))
+            {
+                return RemoveById(entry.Id);
+            }
+
+            return false;
         }
 
         /// <summary>
