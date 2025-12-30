@@ -151,7 +151,8 @@ namespace RuntimeAtlasPacker.Editor
                     EntryCount = kvp.Value.EntryCount,
                     Size = new Vector2Int(kvp.Value.Width, kvp.Value.Height),
                     FillRatio = kvp.Value.FillRatio,
-                    MemoryUsage = CalculateMemoryUsage(kvp.Value)
+                    MemoryUsage = CalculateMemoryUsage(kvp.Value),
+                    SourceFilePath = kvp.Value.SourceFilePath
                 };
                 _atlasInfoCache.Add(info);
             }
@@ -620,6 +621,19 @@ namespace RuntimeAtlasPacker.Editor
             EditorGUILayout.BeginHorizontal();
             EditorGUILayout.LabelField($"Atlas: {_selectedAtlasName}", EditorStyles.boldLabel);
             
+            GUILayout.FlexibleSpace();
+            
+            // Show in Finder/Explorer button (only if loaded from disk)
+            var selectedInfo = _atlasInfoCache.FirstOrDefault(info => info.Atlas == _selectedAtlas);
+            if (!string.IsNullOrEmpty(selectedInfo.SourceFilePath))
+            {
+                var buttonText = Application.platform == RuntimePlatform.OSXEditor ? "Show in Finder" : "Show in Explorer";
+                if (GUILayout.Button(buttonText, GUILayout.Width(120)))
+                {
+                    ShowAtlasInFileExplorer(selectedInfo.SourceFilePath);
+                }
+            }
+            
             if (GUILayout.Button("Export PNG", GUILayout.Width(80)))
             {
                 ExportAtlasToPNG(_selectedAtlas, _selectedAtlasName);
@@ -658,6 +672,28 @@ namespace RuntimeAtlasPacker.Editor
             EditorGUILayout.LabelField($"Entries: {_selectedAtlas.EntryCount}");
             EditorGUILayout.LabelField($"Fill Ratio: {_selectedAtlas.FillRatio:P1}");
             EditorGUILayout.LabelField($"Memory: {FormatBytes(CalculateMemoryUsage(_selectedAtlas))}");
+            
+            // Show source file path if loaded from disk
+            if (!string.IsNullOrEmpty(_selectedAtlas.SourceFilePath))
+            {
+                EditorGUILayout.Space(5);
+                EditorGUILayout.LabelField("Source:", EditorStyles.boldLabel);
+                
+                var directory = System.IO.Path.GetDirectoryName(_selectedAtlas.SourceFilePath);
+                var fileName = System.IO.Path.GetFileNameWithoutExtension(_selectedAtlas.SourceFilePath);
+                
+                EditorGUILayout.BeginHorizontal();
+                EditorGUILayout.LabelField("📁 Loaded from disk", GUILayout.Width(120));
+                EditorGUILayout.SelectableLabel(fileName, GUILayout.Height(16));
+                EditorGUILayout.EndHorizontal();
+                
+                EditorGUILayout.BeginHorizontal();
+                GUILayout.Space(15);
+                EditorGUILayout.SelectableLabel(directory, EditorStyles.miniLabel, GUILayout.Height(14));
+                EditorGUILayout.EndHorizontal();
+                
+                EditorGUILayout.Space(5);
+            }
             
             // Sprite cache info
             var cacheMemory = _selectedAtlas.GetCachedSpriteMemoryUsage();
@@ -1296,6 +1332,40 @@ namespace RuntimeAtlasPacker.Editor
             AssetDatabase.Refresh();
         }
 
+        private void ShowAtlasInFileExplorer(string filePath)
+        {
+            if (string.IsNullOrEmpty(filePath))
+            {
+                Debug.LogWarning("[AtlasDebugWindow] No source file path available for this atlas");
+                return;
+            }
+
+            // Get the directory containing the atlas files
+            var directory = System.IO.Path.GetDirectoryName(filePath);
+            var jsonFile = filePath + ".json";
+
+            // Check if file exists
+            if (!System.IO.File.Exists(jsonFile))
+            {
+                Debug.LogWarning($"[AtlasDebugWindow] Atlas file not found: {jsonFile}");
+                EditorUtility.DisplayDialog("File Not Found", 
+                    $"The atlas file could not be found:\n{jsonFile}\n\nIt may have been moved or deleted.", 
+                    "OK");
+                return;
+            }
+
+            // Open file location
+            try
+            {
+                EditorUtility.RevealInFinder(jsonFile);
+                Debug.Log($"[AtlasDebugWindow] Opened atlas location: {jsonFile}");
+            }
+            catch (System.Exception ex)
+            {
+                Debug.LogError($"[AtlasDebugWindow] Failed to open file location: {ex.Message}");
+            }
+        }
+
         private string FormatBytes(long bytes)
         {
             string[] sizes = { "B", "KB", "MB", "GB" };
@@ -1319,6 +1389,7 @@ namespace RuntimeAtlasPacker.Editor
             public Vector2Int Size;
             public float FillRatio;
             public long MemoryUsage;
+            public string SourceFilePath;
         }
 
         private struct RendererInfo

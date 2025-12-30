@@ -9,12 +9,33 @@ namespace RuntimeAtlasPacker
 {
     /// <summary>
     /// Handles saving and loading of runtime atlases to/from disk.
-    /// Optimized for fast serialization and deserialization.
+    /// Optimized for fast serialization and deserialization with thread-safe operations.
     /// </summary>
     public static class AtlasPersistence
     {
+        // Thread-safe locks per file path to prevent corruption
+        private static readonly Dictionary<string, object> _saveLocks = new Dictionary<string, object>();
+        private static readonly object _locksLock = new object();
+
         /// <summary>
-        /// Save a runtime atlas to disk.
+        /// Get or create a lock object for a specific file path.
+        /// </summary>
+        private static object GetLockForPath(string filePath)
+        {
+            lock (_locksLock)
+            {
+                if (!_saveLocks.TryGetValue(filePath, out var lockObj))
+                {
+                    lockObj = new object();
+                    _saveLocks[filePath] = lockObj;
+                }
+                return lockObj;
+            }
+        }
+
+        /// <summary>
+        /// Save a runtime atlas to disk (thread-safe).
+        /// Multiple save requests to the same path will be queued and executed in order.
         /// </summary>
         /// <param name="atlas">The atlas to save</param>
         /// <param name="filePath">Path to save the atlas data (without extension)</param>
@@ -27,47 +48,54 @@ namespace RuntimeAtlasPacker
                 return false;
             }
 
-            try
+            // Get file-specific lock to prevent concurrent writes to same file
+            var lockObj = GetLockForPath(filePath);
+
+            lock (lockObj)
             {
-#if UNITY_EDITOR
-                var profiler = RuntimeAtlasProfiler.Begin("SaveAtlas", "AtlasPersistence", filePath);
-#endif
-
-                // Serialize atlas data (without texture data)
-                var data = SerializeAtlas(atlas);
-
-                // Save texture pages as PNG files first
-                for (var i = 0; i < atlas.PageCount; i++)
+                try
                 {
-                    var texture = atlas.GetTexture(i);
-                    if (texture != null)
-                    {
-                        var texturePath = $"{filePath}_page{i}.png";
-                        var pngData = texture.EncodeToPNG();
-                        File.WriteAllBytes(texturePath, pngData);
-                    }
-                }
+#if UNITY_EDITOR
+                    var profiler = RuntimeAtlasProfiler.Begin("SaveAtlas", "AtlasPersistence", filePath);
+#endif
 
-                // Save metadata as JSON (now much smaller without texture data!)
-                var jsonPath = $"{filePath}.json";
-                var json = JsonUtility.ToJson(data, true);
-                File.WriteAllText(jsonPath, json);
+                    // Serialize atlas data (without texture data)
+                    var data = SerializeAtlas(atlas);
+
+                    // Save texture pages as PNG files first
+                    for (var i = 0; i < atlas.PageCount; i++)
+                    {
+                        var texture = atlas.GetTexture(i);
+                        if (texture != null)
+                        {
+                            var texturePath = $"{filePath}_page{i}.png";
+                            var pngData = texture.EncodeToPNG();
+                            File.WriteAllBytes(texturePath, pngData);
+                        }
+                    }
+
+                    // Save metadata as JSON (now much smaller without texture data!)
+                    var jsonPath = $"{filePath}.json";
+                    var json = JsonUtility.ToJson(data, true);
+                    File.WriteAllText(jsonPath, json);
 
 #if UNITY_EDITOR
-                RuntimeAtlasProfiler.End(profiler);
-                Debug.Log($"[AtlasPersistence] Successfully saved atlas to {jsonPath} with {data.Pages.Count} page(s)");
+                    RuntimeAtlasProfiler.End(profiler);
+                    Debug.Log($"[AtlasPersistence] Successfully saved atlas to {jsonPath} with {data.Pages.Count} page(s)");
 #endif
-                return true;
-            }
-            catch (Exception ex)
-            {
-                Debug.LogError($"[AtlasPersistence] Failed to save atlas: {ex.Message}");
-                return false;
+                    return true;
+                }
+                catch (Exception ex)
+                {
+                    Debug.LogError($"[AtlasPersistence] Failed to save atlas: {ex.Message}");
+                    return false;
+                }
             }
         }
 
         /// <summary>
-        /// Save a runtime atlas to disk asynchronously.
+        /// Save a runtime atlas to disk asynchronously (thread-safe).
+        /// Multiple save requests to the same path will be queued and executed in order.
         /// </summary>
         /// <param name="atlas">The atlas to save</param>
         /// <param name="filePath">Path to save the atlas data (without extension)</param>
@@ -79,6 +107,12 @@ namespace RuntimeAtlasPacker
                 Debug.LogError("[AtlasPersistence] Cannot save null atlas");
                 return false;
             }
+
+            // Get file-specific lock to prevent concurrent writes to same file
+            var lockObj = GetLockForPath(filePath);
+
+            // Acquire lock asynchronously to avoid blocking main thread
+            await Task.Run(() => System.Threading.Monitor.Enter(lockObj));
 
             try
             {
@@ -130,6 +164,11 @@ namespace RuntimeAtlasPacker
                 Debug.LogError($"[AtlasPersistence] Failed to save atlas: {ex.Message}");
                 return false;
             }
+            finally
+            {
+                // Always release lock
+                System.Threading.Monitor.Exit(lockObj);
+            }
         }
 
         /// <summary>
@@ -173,12 +212,18 @@ namespace RuntimeAtlasPacker
                     }
                 }
 
-                // Deserialize into runtime atlas
-                var atlas = DeserializeAtlas(data, filePath);
+                // Deserialize into RuntimeAtlas
+                var atlas = DeserializeAtlas(data);
+
+                // Set source file path for debugging
+                if (atlas != null)
+                {
+                    atlas.SourceFilePath = System.IO.Path.GetFullPath(filePath);
+                }
 
 #if UNITY_EDITOR
                 RuntimeAtlasProfiler.End(profiler);
-                Debug.Log($"[AtlasPersistence] Successfully loaded atlas from {jsonPath} with {data.Pages.Count} page(s) and {data.Entries.Count} entries");
+                Debug.Log($"[AtlasPersistence] Successfully loaded atlas from {jsonPath}");
 #endif
                 return atlas;
             }
@@ -253,12 +298,18 @@ namespace RuntimeAtlasPacker
                     return null;
                 }
 
-                // Deserialize atlas on main thread (requires Unity API)
-                var atlas = DeserializeAtlasFromData(data, pngDataList);
+                // Deserialize into RuntimeAtlas (on main thread)
+                var atlas = DeserializeAtlas(data);
+
+                // Set source file path for debugging
+                if (atlas != null)
+                {
+                    atlas.SourceFilePath = System.IO.Path.GetFullPath(filePath);
+                }
 
 #if UNITY_EDITOR
                 RuntimeAtlasProfiler.End(profiler);
-                Debug.Log($"[AtlasPersistence] Successfully loaded atlas from {filePath}.json with {data.Pages.Count} page(s) and {data.Entries.Count} entries");
+                Debug.Log($"[AtlasPersistence] Successfully loaded atlas asynchronously from {filePath}.json");
 #endif
                 return atlas;
             }

@@ -97,6 +97,9 @@ namespace RuntimeAtlasPacker
             set => _debugName = string.IsNullOrEmpty(value) ? $"Atlas_{_registryId}" : value;
         }
 
+        /// <summary>Source file path if this atlas was loaded from disk.</summary>
+        public string SourceFilePath { get; internal set; }
+
         /// <summary>Event fired when the atlas texture is resized or recreated.</summary>
         public event Action<RuntimeAtlas> OnAtlasResized;
 

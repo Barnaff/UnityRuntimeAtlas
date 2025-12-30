@@ -158,6 +158,13 @@ namespace RuntimeAtlasPacker
         /// <param name="urlsWithNames">Dictionary of URLs to sprite names</param>
         /// <param name="cancellationToken">Optional cancellation token</param>
         /// <returns>Dictionary mapping sprite names to their sprites</returns>
+        /// <summary>
+        /// Download multiple images and add them as a batch to the atlas.
+        /// Uses batch add for better performance. Handles partial failures gracefully.
+        /// </summary>
+        /// <param name="urlsWithNames">Dictionary of URLs to sprite names</param>
+        /// <param name="cancellationToken">Optional cancellation token</param>
+        /// <returns>Dictionary mapping sprite names to their sprites (null for failed downloads)</returns>
         public async Task<Dictionary<string, Sprite>> DownloadAndAddBatchAsync(
             Dictionary<string, string> urlsWithNames, 
             CancellationToken cancellationToken = default)
@@ -167,7 +174,11 @@ namespace RuntimeAtlasPacker
                 throw new ObjectDisposedException(nameof(AtlasWebLoader));
             }
 
-            // Download all textures
+            var totalCount = urlsWithNames.Count;
+            var downloadFailures = new List<string>();
+            var addFailures = new List<string>();
+
+            // Download all textures (allow partial failures)
             var downloadTasks = new List<Task<(string name, Texture2D texture)>>();
 
             foreach (var kvp in urlsWithNames)
@@ -177,7 +188,7 @@ namespace RuntimeAtlasPacker
 
             var downloadedTextures = await Task.WhenAll(downloadTasks);
 
-            // Build batch dictionary
+            // Build batch dictionary (only successful downloads)
             var textureBatch = new Dictionary<string, Texture2D>();
             foreach (var (name, texture) in downloadedTextures)
             {
@@ -185,44 +196,81 @@ namespace RuntimeAtlasPacker
                 {
                     textureBatch[name] = texture;
                 }
+                else
+                {
+                    downloadFailures.Add(name);
+                }
             }
 
-            // Add all to atlas in one batch (more efficient)
-            var entries = _atlas.AddBatch(textureBatch);
-
-            // Create sprites
             var results = new Dictionary<string, Sprite>();
-            foreach (var kvp in entries)
+
+            // Only proceed with batch add if we have any successful downloads
+            if (textureBatch.Count > 0)
             {
-                if (kvp.Value != null && kvp.Value.IsValid)
+                // Add all to atlas in one batch (more efficient)
+                var entries = _atlas.AddBatch(textureBatch);
+
+                // Create sprites from successful entries
+                foreach (var kvp in entries)
                 {
-                    var sprite = kvp.Value.CreateSprite();
-                    
-                    // Verify sprite is valid before adding to results
-                    if (sprite != null && sprite.texture != null)
+                    if (kvp.Value != null && kvp.Value.IsValid)
                     {
-                        results[kvp.Key] = sprite;
+                        var sprite = kvp.Value.CreateSprite();
+                        
+                        // Verify sprite is valid before adding to results
+                        if (sprite != null && sprite.texture != null)
+                        {
+                            results[kvp.Key] = sprite;
 #if UNITY_EDITOR
-                        Debug.Log($"[AtlasWebLoader] ✓ Batch created sprite '{sprite.name}' - Texture: {sprite.texture.name}");
+                            Debug.Log($"[AtlasWebLoader] ✓ Batch created sprite '{sprite.name}' - Texture: {sprite.texture.name}");
 #endif
+                        }
+                        else
+                        {
+                            addFailures.Add(kvp.Key);
+#if UNITY_EDITOR
+                            Debug.LogWarning($"[AtlasWebLoader] Batch sprite '{kvp.Key}' is invalid - sprite: {sprite != null}, texture: {sprite?.texture != null}");
+#endif
+                        }
                     }
                     else
                     {
-#if UNITY_EDITOR
-                        Debug.LogWarning($"[AtlasWebLoader] Batch sprite '{kvp.Key}' is invalid - sprite: {sprite != null}, texture: {sprite?.texture != null}");
-#endif
+                        addFailures.Add(kvp.Key);
+                    }
+                }
+
+                // Cleanup downloaded textures
+                foreach (var texture in textureBatch.Values)
+                {
+                    if (texture != null)
+                    {
+                        UnityEngine.Object.Destroy(texture);
                     }
                 }
             }
 
-            // Cleanup downloaded textures
-            foreach (var texture in textureBatch.Values)
+            // Report summary
+            var successCount = results.Count;
+            var failureCount = totalCount - successCount;
+
+#if UNITY_EDITOR
+            if (failureCount > 0)
             {
-                if (texture != null)
+                Debug.LogWarning($"[AtlasWebLoader] Batch complete with partial success: {successCount}/{totalCount} succeeded, {failureCount} failed");
+                if (downloadFailures.Count > 0)
                 {
-                    UnityEngine.Object.Destroy(texture);
+                    Debug.LogWarning($"[AtlasWebLoader] Download failures: {string.Join(", ", downloadFailures)}");
+                }
+                if (addFailures.Count > 0)
+                {
+                    Debug.LogWarning($"[AtlasWebLoader] Add failures: {string.Join(", ", addFailures)}");
                 }
             }
+            else
+            {
+                Debug.Log($"[AtlasWebLoader] Batch complete: All {successCount} sprites added successfully");
+            }
+#endif
 
             return results;
         }
