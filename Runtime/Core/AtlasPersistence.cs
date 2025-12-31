@@ -108,18 +108,8 @@ namespace RuntimeAtlasPacker
                 return false;
             }
 
-            // Get file-specific lock to prevent concurrent writes to same file
-            var lockObj = GetLockForPath(filePath);
-            bool lockTaken = false;
-
             try
             {
-                // Acquire lock on background thread to avoid blocking main thread
-                await Task.Run(() =>
-                {
-                    System.Threading.Monitor.Enter(lockObj, ref lockTaken);
-                });
-
 #if UNITY_EDITOR
                 var profiler = RuntimeAtlasProfiler.Begin("SaveAtlasAsync", "AtlasPersistence", filePath);
 #endif
@@ -142,19 +132,24 @@ namespace RuntimeAtlasPacker
                 // Serialize JSON on main thread (compact format without whitespace)
                 var json = JsonUtility.ToJson(data, false);
 
-                // Write files asynchronously (background thread)
+                // Get file-specific lock and write files on background thread
+                var lockObj = GetLockForPath(filePath);
+                
                 await Task.Run(() =>
                 {
-                    // Write PNG files
-                    foreach (var (index, pngData) in pngDataList)
+                    lock (lockObj)
                     {
-                        var texturePath = $"{filePath}_page{index}.png";
-                        File.WriteAllBytes(texturePath, pngData);
-                    }
+                        // Write PNG files
+                        foreach (var (index, pngData) in pngDataList)
+                        {
+                            var texturePath = $"{filePath}_page{index}.png";
+                            File.WriteAllBytes(texturePath, pngData);
+                        }
 
-                    // Write JSON file
-                    var jsonPath = $"{filePath}.json";
-                    File.WriteAllText(jsonPath, json);
+                        // Write JSON file
+                        var jsonPath = $"{filePath}.json";
+                        File.WriteAllText(jsonPath, json);
+                    }
                 });
 
 #if UNITY_EDITOR
@@ -167,14 +162,6 @@ namespace RuntimeAtlasPacker
             {
                 Debug.LogError($"[AtlasPersistence] Failed to save atlas: {ex.Message}");
                 return false;
-            }
-            finally
-            {
-                // Only release lock if it was actually acquired
-                if (lockTaken)
-                {
-                    System.Threading.Monitor.Exit(lockObj);
-                }
             }
         }
 
