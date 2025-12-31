@@ -315,6 +315,44 @@ namespace RuntimeAtlasPacker
         }
 
         /// <summary>
+        /// Check if an atlas exists on disk.
+        /// Verifies that both the JSON metadata file and at least one page PNG file exist.
+        /// </summary>
+        /// <param name="filePath">Path to the atlas file (without extension)</param>
+        /// <returns>True if the atlas exists on disk, false otherwise</returns>
+        public static bool AtlasExists(string filePath)
+        {
+            if (string.IsNullOrEmpty(filePath))
+            {
+                return false;
+            }
+
+            try
+            {
+                // Check if JSON file exists
+                var jsonPath = $"{filePath}.json";
+                if (!File.Exists(jsonPath))
+                {
+                    return false;
+                }
+
+                // Check if at least one page PNG exists
+                var page0Path = $"{filePath}_page0.png";
+                if (!File.Exists(page0Path))
+                {
+                    return false;
+                }
+
+                return true;
+            }
+            catch (Exception)
+            {
+                // If any file system error occurs, consider atlas as non-existent
+                return false;
+            }
+        }
+
+        /// <summary>
         /// Serialize a runtime atlas to data structure.
         /// </summary>
         private static AtlasSerializationData SerializeAtlas(RuntimeAtlas atlas)

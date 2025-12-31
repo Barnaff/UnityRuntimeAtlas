@@ -1515,6 +1515,17 @@ namespace RuntimeAtlasPacker
         }
 
         /// <summary>
+        /// Check if an atlas exists on disk.
+        /// Verifies that both the JSON metadata file and at least one page PNG file exist.
+        /// </summary>
+        /// <param name="filePath">Path to the atlas file (without extension)</param>
+        /// <returns>True if the atlas exists on disk, false otherwise</returns>
+        public static bool Exists(string filePath)
+        {
+            return AtlasPersistence.AtlasExists(filePath);
+        }
+
+        /// <summary>
         /// Force a full repack of the atlas.
         /// Useful after many removes to reclaim fragmented space.
         /// </summary>
