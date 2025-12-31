@@ -110,12 +110,16 @@ namespace RuntimeAtlasPacker
 
             // Get file-specific lock to prevent concurrent writes to same file
             var lockObj = GetLockForPath(filePath);
-
-            // Acquire lock asynchronously to avoid blocking main thread
-            await Task.Run(() => System.Threading.Monitor.Enter(lockObj));
+            bool lockTaken = false;
 
             try
             {
+                // Acquire lock on background thread to avoid blocking main thread
+                await Task.Run(() =>
+                {
+                    System.Threading.Monitor.Enter(lockObj, ref lockTaken);
+                });
+
 #if UNITY_EDITOR
                 var profiler = RuntimeAtlasProfiler.Begin("SaveAtlasAsync", "AtlasPersistence", filePath);
 #endif
@@ -166,8 +170,11 @@ namespace RuntimeAtlasPacker
             }
             finally
             {
-                // Always release lock
-                System.Threading.Monitor.Exit(lockObj);
+                // Only release lock if it was actually acquired
+                if (lockTaken)
+                {
+                    System.Threading.Monitor.Exit(lockObj);
+                }
             }
         }
 
