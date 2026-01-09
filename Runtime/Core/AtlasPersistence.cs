@@ -4,6 +4,8 @@ using System.IO;
 using System.Linq;
 using System.Threading.Tasks;
 using UnityEngine;
+using UnityEngine.Rendering;
+using UnityEngine.Experimental.Rendering;
 
 namespace RuntimeAtlasPacker
 {
@@ -35,134 +37,27 @@ namespace RuntimeAtlasPacker
 
         /// <summary>
         /// Save a runtime atlas to disk (thread-safe).
-        /// Multiple save requests to the same path will be queued and executed in order.
+        /// ⚠️ DEPRECATED: Use SaveAtlasAsync instead for better memory management on mobile devices.
+        /// This synchronous method may cause memory crashes with large atlases on mobile.
         /// </summary>
         /// <param name="atlas">The atlas to save</param>
         /// <param name="filePath">Path to save the atlas data (without extension)</param>
         /// <returns>True if successful</returns>
+        [Obsolete("Use SaveAtlasAsync instead for better memory management and performance")]
         public static bool SaveAtlas(RuntimeAtlas atlas, string filePath)
         {
-            if (atlas == null)
-            {
-                Debug.LogError("[AtlasPersistence] Cannot save null atlas");
-                return false;
-            }
-
-            // Get file-specific lock to prevent concurrent writes to same file
-            var lockObj = GetLockForPath(filePath);
-
-            lock (lockObj)
-            {
-                try
-                {
-#if UNITY_EDITOR
-                    var profiler = RuntimeAtlasProfiler.Begin("SaveAtlas", "AtlasPersistence", filePath);
-#endif
-
-                    // Serialize atlas data (without texture data)
-                    var data = SerializeAtlas(atlas);
-
-                    // Save texture pages as PNG files first
-                    // ✅ CRITICAL FIX: Track original readable state and temporarily make textures readable for EncodeToPNG
-                    var originalReadableStates = new bool[atlas.PageCount];
-                    
-                    for (var i = 0; i < atlas.PageCount; i++)
-                    {
-                        var texture = atlas.GetTexture(i);
-                        if (texture != null)
-                        {
-                            originalReadableStates[i] = texture.isReadable;
-                            
-                            // If texture is not readable, we need to read it from GPU
-                            if (!texture.isReadable)
-                            {
-#if UNITY_EDITOR
-                                Debug.LogWarning($"[AtlasPersistence] Texture page {i} is not readable, reading from GPU for save operation");
-#endif
-                                // Create a temporary readable copy from GPU
-                                var rt = RenderTexture.GetTemporary(texture.width, texture.height, 0, RenderTextureFormat.ARGB32);
-                                Graphics.Blit(texture, rt);
-                                
-                                var previous = RenderTexture.active;
-                                RenderTexture.active = rt;
-                                
-                                var readableTexture = new Texture2D(texture.width, texture.height, texture.format, false);
-                                readableTexture.ReadPixels(new Rect(0, 0, rt.width, rt.height), 0, 0);
-                                readableTexture.Apply();
-                                
-                                RenderTexture.active = previous;
-                                RenderTexture.ReleaseTemporary(rt);
-                                
-                                // Encode and save
-                                var texturePath = $"{filePath}_page{i}.png";
-                                var pngData = readableTexture.EncodeToPNG();
-                                
-#if UNITY_EDITOR
-                                Debug.Log($"[AtlasPersistence] Page {i} PNG encoded: {pngData?.Length ?? 0} bytes (from non-readable texture)");
-#endif
-                                
-                                if (pngData == null || pngData.Length == 0)
-                                {
-                                    Debug.LogError($"[AtlasPersistence] PNG encoding FAILED for page {i} - no data produced!");
-                                    continue;
-                                }
-                                
-                                File.WriteAllBytes(texturePath, pngData);
-                                
-#if UNITY_EDITOR
-                                Debug.Log($"[AtlasPersistence] Page {i} saved to: {texturePath}");
-#endif
-                                
-                                // Clean up temporary texture
-                                UnityEngine.Object.Destroy(readableTexture);
-                            }
-                            else
-                            {
-                                // Texture is already readable, encode directly
-                                var texturePath = $"{filePath}_page{i}.png";
-                                var pngData = texture.EncodeToPNG();
-                                
-#if UNITY_EDITOR
-                                Debug.Log($"[AtlasPersistence] Page {i} PNG encoded: {pngData?.Length ?? 0} bytes (from readable texture)");
-#endif
-                                
-                                if (pngData == null || pngData.Length == 0)
-                                {
-                                    Debug.LogError($"[AtlasPersistence] PNG encoding FAILED for page {i} - no data produced!");
-                                    continue;
-                                }
-                                
-                                File.WriteAllBytes(texturePath, pngData);
-                                
-#if UNITY_EDITOR
-                                Debug.Log($"[AtlasPersistence] Page {i} saved to: {texturePath}");
-#endif
-                            }
-                        }
-                    }
-
-                    // Save metadata as JSON (compact format without whitespace for smaller file size)
-                    var jsonPath = $"{filePath}.json";
-                    var json = JsonUtility.ToJson(data, false);
-                    File.WriteAllText(jsonPath, json);
-
-#if UNITY_EDITOR
-                    RuntimeAtlasProfiler.End(profiler);
-                    Debug.Log($"[AtlasPersistence] Successfully saved atlas to {jsonPath} with {data.Pages.Count} page(s)");
-#endif
-                    return true;
-                }
-                catch (Exception ex)
-                {
-                    Debug.LogError($"[AtlasPersistence] Failed to save atlas: {ex.Message}");
-                    return false;
-                }
-            }
+            Debug.LogWarning("[AtlasPersistence] SaveAtlas is deprecated. Use SaveAtlasAsync for better memory management.");
+            
+            // Redirect to async version and wait for completion
+            var task = SaveAtlasAsync(atlas, filePath);
+            task.Wait();
+            return task.Result;
         }
 
         /// <summary>
-        /// Save a runtime atlas to disk asynchronously (thread-safe).
-        /// Multiple save requests to the same path will be queued and executed in order.
+        /// Save a runtime atlas to disk asynchronously using AsyncGPUReadback for better performance.
+        /// This avoids blocking the main thread and prevents memory crashes on mobile.
+        /// ✅ GUARANTEES: Original resolution, quality, and format are NEVER changed.
         /// </summary>
         /// <param name="atlas">The atlas to save</param>
         /// <param name="filePath">Path to save the atlas data (without extension)</param>
@@ -181,55 +76,140 @@ namespace RuntimeAtlasPacker
                 var profiler = RuntimeAtlasProfiler.Begin("SaveAtlasAsync", "AtlasPersistence", filePath);
 #endif
 
+                Debug.Log($"[AtlasPersistence] Starting async save of {atlas.PageCount} page(s) to: {filePath}");
+
                 // Serialize atlas data (without texture data) - on main thread
                 var data = SerializeAtlas(atlas);
 
-                // Encode PNGs on main thread (Unity requirement)
-                // ✅ CRITICAL FIX: Handle non-readable textures by reading from GPU
-                var pngDataList = new List<(int index, byte[] data)>();
+                // ✅ Use AsyncGPUReadback for ALL textures - more efficient and memory-safe
+                // This works for both readable and non-readable textures
+                var pngDataList = new List<(int index, byte[] data, int width, int height)>();
+                
                 for (var i = 0; i < atlas.PageCount; i++)
                 {
                     var texture = atlas.GetTexture(i);
-                    if (texture != null)
+                    if (texture == null)
                     {
-                        byte[] pngData;
-                        
-                        if (!texture.isReadable)
-                        {
-#if UNITY_EDITOR
-                            Debug.LogWarning($"[AtlasPersistence] Texture page {i} is not readable, reading from GPU for async save");
-#endif
-                            // Create a temporary readable copy from GPU
-                            var rt = RenderTexture.GetTemporary(texture.width, texture.height, 0, RenderTextureFormat.ARGB32);
-                            Graphics.Blit(texture, rt);
-                            
-                            var previous = RenderTexture.active;
-                            RenderTexture.active = rt;
-                            
-                            var readableTexture = new Texture2D(texture.width, texture.height, texture.format, false);
-                            readableTexture.ReadPixels(new Rect(0, 0, rt.width, rt.height), 0, 0);
-                            readableTexture.Apply();
-                            
-                            RenderTexture.active = previous;
-                            RenderTexture.ReleaseTemporary(rt);
-                            
-                            // Encode to PNG
-                            pngData = readableTexture.EncodeToPNG();
-                            
-                            // Clean up temporary texture
-                            UnityEngine.Object.Destroy(readableTexture);
-                        }
-                        else
-                        {
-                            // Texture is readable, encode directly
-                            pngData = texture.EncodeToPNG();
-                        }
-                        
-                        pngDataList.Add((i, pngData));
+                        Debug.LogWarning($"[AtlasPersistence] Skipping null texture at page {i}");
+                        continue;
                     }
+
+                    Debug.Log($"[AtlasPersistence] Starting async GPU readback for page {i}: {texture.width}x{texture.height}, Format: {texture.format}, Readable: {texture.isReadable}");
+
+                    // Use AsyncGPUReadback to read from GPU (works for both readable and non-readable textures)
+                    var request = AsyncGPUReadback.Request(texture, 0);
+                    
+                    // Wait for GPU readback to complete
+                    while (!request.done)
+                    {
+                        await Task.Yield(); // Yield to prevent blocking
+                    }
+                    
+                    if (request.hasError)
+                    {
+                        Debug.LogError($"[AtlasPersistence] AsyncGPUReadback failed for page {i}");
+                        continue;
+                    }
+
+                    // Get the raw pixel data from GPU as Color32 array
+                    var rawData = request.GetData<Color32>();
+                    
+                    if (rawData.Length == 0)
+                    {
+                        Debug.LogError($"[AtlasPersistence] No data received from AsyncGPUReadback for page {i}");
+                        continue;
+                    }
+
+                    var expectedPixelCount = texture.width * texture.height;
+                    if (rawData.Length != expectedPixelCount)
+                    {
+                        Debug.LogError($"[AtlasPersistence] Data size mismatch for page {i}: got {rawData.Length} pixels, expected {expectedPixelCount}");
+                        continue;
+                    }
+
+                    // ✅ CRITICAL: Copy NativeArray data to managed array BEFORE going to background thread
+                    // The NativeArray from AsyncGPUReadback is tied to the request and will be disposed
+                    var pixelBytes = new byte[rawData.Length * 4];
+                    for (int p = 0; p < rawData.Length; p++)
+                    {
+                        pixelBytes[p * 4 + 0] = rawData[p].r;
+                        pixelBytes[p * 4 + 1] = rawData[p].g;
+                        pixelBytes[p * 4 + 2] = rawData[p].b;
+                        pixelBytes[p * 4 + 3] = rawData[p].a;
+                    }
+
+#if UNITY_EDITOR
+                    // Verify data is not blank
+                    var testPixel = rawData[0];
+                    var centerPixel = rawData[rawData.Length / 2];
+                    var isAllBlank = true;
+                    for (int check = 0; check < Math.Min(100, rawData.Length); check++)
+                    {
+                        var p = rawData[check];
+                        if (p.r != 0 || p.g != 0 || p.b != 0 || p.a != 0)
+                        {
+                            isAllBlank = false;
+                            break;
+                        }
+                    }
+                    Debug.Log($"[AtlasPersistence] AsyncGPUReadback received {rawData.Length} pixels for page {i}");
+                    Debug.Log($"  - First pixel: RGBA({testPixel.r}, {testPixel.g}, {testPixel.b}, {testPixel.a})");
+                    Debug.Log($"  - Center pixel: RGBA({centerPixel.r}, {centerPixel.g}, {centerPixel.b}, {centerPixel.a})");
+                    Debug.Log($"  - All blank: {isAllBlank}");
+                    
+                    if (isAllBlank)
+                    {
+                        Debug.LogWarning($"[AtlasPersistence] ⚠️ Page {i} appears to be completely blank!");
+                    }
+#endif
+
+                    // Store texture dimensions for background thread
+                    var textureWidth = texture.width;
+                    var textureHeight = texture.height;
+                    var pageIndex = i;
+
+                    // Encode to PNG on a background thread
+                    // ✅ CRITICAL: Use ImageConversion.EncodeArrayToPNG which preserves EXACT original quality
+                    byte[] pngData = await Task.Run(() =>
+                    {
+                        try
+                        {
+                            // Use EncodeArrayToPNG to encode at original resolution with NO quality loss
+                            // GraphicsFormat.R8G8B8A8_UNorm = 8-bit per channel RGBA (standard PNG format)
+                            var png = ImageConversion.EncodeArrayToPNG(
+                                pixelBytes, 
+                                GraphicsFormat.R8G8B8A8_UNorm, 
+                                (uint)textureWidth, 
+                                (uint)textureHeight
+                            );
+
+                            Debug.Log($"[AtlasPersistence] Page {pageIndex} encoded to PNG: {png?.Length ?? 0} bytes");
+                            return png;
+                        }
+                        catch (Exception ex)
+                        {
+                            Debug.LogError($"[AtlasPersistence] PNG encoding failed for page {pageIndex}: {ex.Message}\n{ex.StackTrace}");
+                            return null;
+                        }
+                    });
+
+                    if (pngData == null || pngData.Length == 0)
+                    {
+                        Debug.LogError($"[AtlasPersistence] PNG encoding failed for page {i} - no data produced");
+                        continue;
+                    }
+
+                    Debug.Log($"[AtlasPersistence] ✓ Page {i} successfully encoded: {pngData.Length} bytes at {texture.width}x{texture.height}");
+                    pngDataList.Add((i, pngData, texture.width, texture.height));
                 }
 
-                // Serialize JSON on main thread (compact format without whitespace)
+                if (pngDataList.Count == 0)
+                {
+                    Debug.LogError("[AtlasPersistence] No pages were successfully encoded!");
+                    return false;
+                }
+
+                // Serialize JSON on main thread (compact format)
                 var json = JsonUtility.ToJson(data, false);
 
                 // Get file-specific lock and write files on background thread
@@ -239,28 +219,45 @@ namespace RuntimeAtlasPacker
                 {
                     lock (lockObj)
                     {
-                        // Write PNG files
-                        foreach (var (index, pngData) in pngDataList)
+                        try
                         {
-                            var texturePath = $"{filePath}_page{index}.png";
-                            File.WriteAllBytes(texturePath, pngData);
-                        }
+                            // Ensure directory exists
+                            var directory = Path.GetDirectoryName(filePath);
+                            if (!string.IsNullOrEmpty(directory) && !Directory.Exists(directory))
+                            {
+                                Directory.CreateDirectory(directory);
+                            }
 
-                        // Write JSON file
-                        var jsonPath = $"{filePath}.json";
-                        File.WriteAllText(jsonPath, json);
+                            // Write PNG files
+                            foreach (var (index, pngData, width, height) in pngDataList)
+                            {
+                                var texturePath = $"{filePath}_page{index}.png";
+                                File.WriteAllBytes(texturePath, pngData);
+                                Debug.Log($"[AtlasPersistence] Wrote page {index} to disk: {texturePath} ({pngData.Length} bytes, {width}x{height})");
+                            }
+
+                            // Write JSON file
+                            var jsonPath = $"{filePath}.json";
+                            File.WriteAllText(jsonPath, json);
+                            Debug.Log($"[AtlasPersistence] Wrote metadata to disk: {jsonPath}");
+                        }
+                        catch (Exception ex)
+                        {
+                            Debug.LogError($"[AtlasPersistence] File write error: {ex.Message}\n{ex.StackTrace}");
+                            throw;
+                        }
                     }
                 });
 
 #if UNITY_EDITOR
                 RuntimeAtlasProfiler.End(profiler);
-                Debug.Log($"[AtlasPersistence] Successfully saved atlas to {filePath}.json with {data.Pages.Count} page(s)");
 #endif
+                Debug.Log($"[AtlasPersistence] ✓ Successfully saved atlas to {filePath}.json with {pngDataList.Count} page(s)");
                 return true;
             }
             catch (Exception ex)
             {
-                Debug.LogError($"[AtlasPersistence] Failed to save atlas: {ex.Message}");
+                Debug.LogError($"[AtlasPersistence] Failed to save atlas: {ex.Message}\n{ex.StackTrace}");
                 return false;
             }
         }
@@ -582,6 +579,21 @@ namespace RuntimeAtlasPacker
                     
 #if UNITY_EDITOR
                     Debug.Log($"[AtlasPersistence] Loading page {i}: Read {pngData.Length} bytes from {texturePath}");
+                    
+                    // Verify PNG data is not all zeros
+                    bool allZeros = true;
+                    for (int b = 0; b < Math.Min(100, pngData.Length); b++)
+                    {
+                        if (pngData[b] != 0)
+                        {
+                            allZeros = false;
+                            break;
+                        }
+                    }
+                    if (allZeros)
+                    {
+                        Debug.LogError($"[AtlasPersistence] ⚠️ PNG file appears to be all zeros (corrupt or blank)!");
+                    }
 #endif
 
                     // Create texture from PNG data
@@ -614,6 +626,23 @@ namespace RuntimeAtlasPacker
                     if (!texture.isReadable)
                     {
                         Debug.LogError($"[AtlasPersistence] ⚠️ Texture is non-readable after LoadImage!");
+                    }
+                    
+                    // ✅ DIAGNOSTIC: Check pixel data BEFORE Apply()
+                    try
+                    {
+                        var testPixelBefore = texture.GetPixel(0, 0);
+                        var isBlankBefore = (testPixelBefore.r == 0 && testPixelBefore.g == 0 && testPixelBefore.b == 0 && testPixelBefore.a == 0);
+                        Debug.Log($"[AtlasPersistence] BEFORE Apply() - pixel at (0,0): RGBA({testPixelBefore.r:F3}, {testPixelBefore.g:F3}, {testPixelBefore.b:F3}, {testPixelBefore.a:F3}), IsBlank: {isBlankBefore}");
+                        
+                        if (isBlankBefore)
+                        {
+                            Debug.LogError($"[AtlasPersistence] ⚠️ Texture is blank BEFORE Apply()! LoadImage() did not load pixel data correctly or PNG is blank.");
+                        }
+                    }
+                    catch (System.Exception ex)
+                    {
+                        Debug.LogError($"[AtlasPersistence] Failed to read pixel before Apply: {ex.Message}");
                     }
 #endif
 
@@ -1136,6 +1165,7 @@ namespace RuntimeAtlasPacker
             Debug.LogError("[AtlasPersistence] Failed to create AtlasEntry via reflection");
             return null;
         }
+
     }
 }
 

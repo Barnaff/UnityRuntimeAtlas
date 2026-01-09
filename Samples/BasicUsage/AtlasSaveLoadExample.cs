@@ -383,8 +383,9 @@ namespace RuntimeAtlasPacker.Samples
                 return;
             }
 
-            var success = _atlas.Save(_fullSavePath);
-            if (success)
+            // Use async save method to prevent memory crashes on mobile
+            var saveTask = SaveAtlasAsync();
+            StartCoroutine(WaitForTask(saveTask, () =>
             {
                 Debug.Log($"[AtlasSaveLoadExample] ✓ Atlas saved successfully to: {_fullSavePath}");
                 Debug.Log($"[AtlasSaveLoadExample]   - {_atlas.EntryCount} entries");
@@ -404,13 +405,43 @@ namespace RuntimeAtlasPacker.Samples
                     if (File.Exists(pageFile))
                     {
                         var fileInfo = new FileInfo(pageFile);
-                        Debug.Log($"[AtlasSaveLoadExample]   - Page {i}: {fileInfo.Length / 1024}KB");
+                        Debug.Log($"[AtlasSaveLoadExample]   - File {i}: {fileInfo.Length / 1024}KB");
                     }
                 }
+            }));
+        }
+
+        private async Task SaveAtlasAsync()
+        {
+            try
+            {
+                // Use the async save method to prevent memory crashes on mobile
+                var success = await AtlasPersistence.SaveAtlasAsync(_atlas, _fullSavePath);
+                if (!success)
+                {
+                    Debug.LogError("[AtlasSaveLoadExample] ✗ Failed to save atlas!");
+                }
+            }
+            catch (Exception ex)
+            {
+                Debug.LogError($"[AtlasSaveLoadExample] ✗ Exception saving atlas: {ex.Message}");
+            }
+        }
+
+        private IEnumerator WaitForTask(Task task, System.Action onComplete)
+        {
+            while (!task.IsCompleted)
+            {
+                yield return null;
+            }
+
+            if (task.Exception != null)
+            {
+                Debug.LogError($"[AtlasSaveLoadExample] Task failed: {task.Exception.GetBaseException().Message}");
             }
             else
             {
-                Debug.LogError("[AtlasSaveLoadExample] ✗ Failed to save atlas!");
+                onComplete?.Invoke();
             }
         }
 
