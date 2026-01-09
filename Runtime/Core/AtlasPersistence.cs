@@ -421,7 +421,8 @@ namespace RuntimeAtlasPacker
                     UVRect = new RectSerializable(entry.UV),
                     Border = new Vector4Serializable(entry.Border),
                     Pivot = new Vector2Serializable(entry.Pivot),
-                    PixelsPerUnit = entry.PixelsPerUnit
+                    PixelsPerUnit = entry.PixelsPerUnit,
+                    SpriteVersion = entry.SpriteVersion
                 };
                 data.Entries.Add(entryData);
 
@@ -735,7 +736,8 @@ namespace RuntimeAtlasPacker
                             entryData.Name,
                             entryData.Border.ToVector4(),
                             entryData.Pivot.ToVector2(),
-                            entryData.PixelsPerUnit
+                            entryData.PixelsPerUnit,
+                            entryData.SpriteVersion
                         );
 
                         if (entry != null)
@@ -894,19 +896,20 @@ namespace RuntimeAtlasPacker
             string name,
             Vector4 border,
             Vector2 pivot,
-            float pixelsPerUnit)
+            float pixelsPerUnit,
+            int spriteVersion = 0)
         {
             var entryType = typeof(AtlasEntry);
             var constructor = entryType.GetConstructor(
                 System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance,
                 null,
-                new[] { typeof(RuntimeAtlas), typeof(int), typeof(int), typeof(RectInt), typeof(Rect), typeof(string), typeof(Vector4), typeof(Vector2), typeof(float) },
+                new[] { typeof(RuntimeAtlas), typeof(int), typeof(int), typeof(RectInt), typeof(Rect), typeof(string), typeof(Vector4), typeof(Vector2), typeof(float), typeof(int) },
                 null
             );
 
             if (constructor != null)
             {
-                return (AtlasEntry)constructor.Invoke(new object[] { atlas, id, textureIndex, pixelRect, uvRect, name, border, pivot, pixelsPerUnit });
+                return (AtlasEntry)constructor.Invoke(new object[] { atlas, id, textureIndex, pixelRect, uvRect, name, border, pivot, pixelsPerUnit, spriteVersion });
             }
 
             Debug.LogError("[AtlasPersistence] Failed to create AtlasEntry via reflection");

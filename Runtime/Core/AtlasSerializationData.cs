@@ -151,6 +151,16 @@ namespace RuntimeAtlasPacker
         public Vector4Serializable Border;
         public Vector2Serializable Pivot;
         public float PixelsPerUnit;
+        
+        [UnityEngine.SerializeField]
+        private int _v;
+        
+        /// <summary>Sprite version (stored as "_v" in JSON to reduce size)</summary>
+        public int SpriteVersion
+        {
+            get => _v;
+            set => _v = value;
+        }
     }
 
     /// <summary>

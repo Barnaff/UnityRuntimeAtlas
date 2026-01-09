@@ -188,6 +188,7 @@ namespace RuntimeAtlasPacker
         /// <para>Textures loaded from Resources or assigned in the Inspector should NOT be destroyed.</para>
         /// </summary>
         /// <param name="texture">The texture to add to the atlas</param>
+        /// <param name="spriteVersion">Optional sprite version number (default is 0). Used to track content changes.</param>
         /// <returns>A tuple containing the result status and an AtlasEntry reference (null if not successful).</returns>
         /// <example>
         /// <code>
@@ -200,9 +201,12 @@ namespace RuntimeAtlasPacker
         /// var resourceTexture = Resources.Load&lt;Texture2D&gt;("MyTexture");
         /// var (result, entry) = atlas.Add(resourceTexture);
         /// // Do NOT destroy resourceTexture - Unity manages it
+        /// 
+        /// // Example 3: With version tracking
+        /// var (result, entry) = atlas.Add(texture, spriteVersion: 2);
         /// </code>
         /// </example>
-        public (AddResult result, AtlasEntry entry) Add(Texture2D texture)
+        public (AddResult result, AtlasEntry entry) Add(Texture2D texture, int spriteVersion = 0)
         {
             if (_isDisposed)
             {
@@ -235,7 +239,7 @@ namespace RuntimeAtlasPacker
 #endif
 
             // Use internal method for packing
-            var (result, entry) = AddInternal(texture);
+            var (result, entry) = AddInternal(texture, spriteVersion);
             
             if (result != AddResult.Success)
             {
@@ -282,8 +286,9 @@ namespace RuntimeAtlasPacker
         /// <param name="border">Border values for 9-slicing (left, bottom, right, top)</param>
         /// <param name="pivot">Pivot point (0-1 normalized)</param>
         /// <param name="pixelsPerUnit">Pixels per unit value</param>
+        /// <param name="spriteVersion">Optional sprite version number (default is 0)</param>
         /// <returns>A tuple containing the result status and an AtlasEntry reference (null if not successful).</returns>
-        public (AddResult result, AtlasEntry entry) Add(Texture2D texture, Vector4 border, Vector2 pivot, float pixelsPerUnit = 100f)
+        public (AddResult result, AtlasEntry entry) Add(Texture2D texture, Vector4 border, Vector2 pivot, float pixelsPerUnit = 100f, int spriteVersion = 0)
         {
             if (_isDisposed)
             {
@@ -312,7 +317,7 @@ namespace RuntimeAtlasPacker
 #endif
 
             // Use internal method for packing
-            var (result, entry) = AddInternal(texture, border, pivot, pixelsPerUnit);
+            var (result, entry) = AddInternal(texture, border, pivot, pixelsPerUnit, spriteVersion);
             
             if (result != AddResult.Success)
             {
@@ -356,8 +361,9 @@ namespace RuntimeAtlasPacker
         /// </summary>
         /// <param name="name">The unique name to associate with this texture</param>
         /// <param name="texture">The texture to add</param>
+        /// <param name="spriteVersion">Optional sprite version number (default is 0). If the same version already exists, the existing entry is returned.</param>
         /// <returns>A tuple containing the result status and an AtlasEntry reference (null if not successful).</returns>
-        public (AddResult result, AtlasEntry entry) Add(string name, Texture2D texture)
+        public (AddResult result, AtlasEntry entry) Add(string name, Texture2D texture, int spriteVersion = 0)
         {
             if (string.IsNullOrEmpty(name))
             {
@@ -367,14 +373,26 @@ namespace RuntimeAtlasPacker
                 return (AddResult.InvalidTexture, null);
             }
 
-            // Remove existing entry with this name if it exists
+            // Check if entry with same name and version already exists
             if (_entriesByName.TryGetValue(name, out var existingEntry))
             {
+                if (existingEntry.SpriteVersion == spriteVersion)
+                {
+#if UNITY_EDITOR
+                    Debug.Log($"[RuntimeAtlas.Add] Entry '{name}' with version {spriteVersion} already exists, returning existing entry");
+#endif
+                    return (AddResult.Success, existingEntry);
+                }
+                
+                // Different version - remove old and add new
+#if UNITY_EDITOR
+                Debug.Log($"[RuntimeAtlas.Add] Replacing '{name}' version {existingEntry.SpriteVersion} with version {spriteVersion}");
+#endif
                 RemoveById(existingEntry.Id);
             }
 
-            // Add the texture
-            var (result, entry) = Add(texture);
+            // Add the texture with version
+            var (result, entry) = Add(texture, spriteVersion);
             
             if (result == AddResult.Success && entry != null)
             {
@@ -573,6 +591,17 @@ namespace RuntimeAtlasPacker
         }
         
         /// <summary>
+        /// Get the sprite version number for a named entry.
+        /// </summary>
+        /// <param name="name">The name of the sprite</param>
+        /// <returns>The sprite version number, or -1 if not found</returns>
+        public int GetSpriteVersion(string name)
+        {
+            var entry = GetEntryByName(name);
+            return entry?.SpriteVersion ?? -1;
+        }
+        
+        /// <summary>
         /// Validate that no entries overlap with each other.
         /// Only runs in editor for performance.
         /// </summary>
@@ -692,23 +721,23 @@ namespace RuntimeAtlasPacker
         /// you MUST destroy them after calling this method to avoid memory leaks.</para>
         /// </summary>
         /// <param name="textures">Dictionary of sprite keys to textures</param>
+        /// <param name="spriteVersion">Optional sprite version number (default is 0). Applied to all sprites in the batch.</param>
         /// <returns>Dictionary mapping keys to successfully added AtlasEntry objects</returns>
         /// <example>
         /// <code>
-        /// // Example: Batch add with cleanup
+        /// // Example: Batch add with cleanup and version
         /// var textureDict = new Dictionary&lt;string, Texture2D&gt;();
         /// textureDict["enemy"] = await DownloadTextureAsync(url1);
         /// textureDict["player"] = await DownloadTextureAsync(url2);
         /// 
-        /// var entries = atlas.AddBatch(textureDict);
+        /// var entries = atlas.AddBatch(textureDict, spriteVersion: 2);
         /// 
         /// // REQUIRED: Destroy input textures to prevent memory leak
         /// foreach (var tex in textureDict.Values)
         ///     if (tex != null) Object.Destroy(tex);
         /// </code>
         /// </example>
-        /// <returns>Dictionary mapping keys to successfully added AtlasEntry objects</returns>
-        public Dictionary<string, AtlasEntry> AddBatch(Dictionary<string, Texture2D> textures)
+        public Dictionary<string, AtlasEntry> AddBatch(Dictionary<string, Texture2D> textures, int spriteVersion = 0)
         {
             if (_isDisposed)
             {
@@ -772,7 +801,7 @@ namespace RuntimeAtlasPacker
             {
                 var (key, tex, _) = sortedList[i];
                 
-                var (result, entry) = AddInternal(tex);
+                var (result, entry) = AddInternal(tex, spriteVersion);
                 if (result == AddResult.Success && entry != null)
                 {
                     // Store in name dictionary
@@ -837,6 +866,194 @@ namespace RuntimeAtlasPacker
             
 #if UNITY_EDITOR
             Debug.Log($"[RuntimeAtlas] AddBatch: Complete. Added: {successCount}, Failed: {failCount}, Total entries in atlas: {_entries.Count}");
+            RuntimeAtlasProfiler.End(profiler);
+#endif
+
+            return successfulEntries;
+        }
+
+        /// <summary>
+        /// Add multiple textures to the atlas in a single batch with individual versions for each sprite.
+        /// More efficient than adding one at a time.
+        /// Returns a dictionary mapping keys to successfully added entries (skips failures).
+        /// If a texture with the same key already exists, it will be replaced based on version comparison.
+        /// <para>⚠️ <b>IMPORTANT</b>: This method COPIES the texture data into the atlas.</para>
+        /// <para>The input dictionaries are NOT modified. If you created or downloaded these textures,
+        /// you MUST destroy them after calling this method to avoid memory leaks.</para>
+        /// </summary>
+        /// <param name="textures">Dictionary of sprite keys to textures</param>
+        /// <param name="versions">Dictionary of sprite keys to version numbers. If a key is missing, version defaults to 0.</param>
+        /// <returns>Dictionary mapping keys to successfully added AtlasEntry objects</returns>
+        /// <example>
+        /// <code>
+        /// // Example: Batch add with individual versions
+        /// var textureDict = new Dictionary&lt;string, Texture2D&gt;();
+        /// textureDict["enemy"] = enemyTexture;
+        /// textureDict["player"] = playerTexture;
+        /// 
+        /// var versionDict = new Dictionary&lt;string, int&gt;();
+        /// versionDict["enemy"] = 2;   // Enemy is version 2
+        /// versionDict["player"] = 5;  // Player is version 5
+        /// 
+        /// var entries = atlas.AddBatch(textureDict, versionDict);
+        /// 
+        /// // REQUIRED: Destroy input textures to prevent memory leak
+        /// foreach (var tex in textureDict.Values)
+        ///     if (tex != null) Object.Destroy(tex);
+        /// </code>
+        /// </example>
+        public Dictionary<string, AtlasEntry> AddBatch(Dictionary<string, Texture2D> textures, Dictionary<string, int> versions)
+        {
+            if (_isDisposed)
+            {
+#if UNITY_EDITOR
+                Debug.LogWarning("[RuntimeAtlas.AddBatch] Atlas is disposed");
+#endif
+                return new Dictionary<string, AtlasEntry>();
+            }
+            
+            if (textures == null || textures.Count == 0)
+            {
+#if UNITY_EDITOR
+                Debug.LogWarning("[RuntimeAtlas.AddBatch] No textures provided");
+#endif
+                return new Dictionary<string, AtlasEntry>();
+            }
+
+#if UNITY_EDITOR
+            var profiler = RuntimeAtlasProfiler.Begin("AddBatch", GetAtlasName(), $"{textures.Count} textures with individual versions");
+#endif
+
+#if UNITY_EDITOR
+            Debug.Log($"[RuntimeAtlas] AddBatch: Starting batch of {textures.Count} textures with individual versions");
+#endif
+
+            // ✅ OPTIMIZATION: Batch remove/check existing entries based on version
+            foreach (var key in textures.Keys)
+            {
+                if (_entriesByName.TryGetValue(key, out var existingEntry))
+                {
+                    int newVersion = versions != null && versions.TryGetValue(key, out var v) ? v : 0;
+                    
+                    if (existingEntry.SpriteVersion == newVersion)
+                    {
+#if UNITY_EDITOR
+                        Debug.Log($"[RuntimeAtlas] AddBatch: Entry '{key}' with version {newVersion} already exists, will skip");
+#endif
+                        continue;
+                    }
+                    
+#if UNITY_EDITOR
+                    Debug.Log($"[RuntimeAtlas] AddBatch: Removing existing entry '{key}' (v{existingEntry.SpriteVersion}) to replace with v{newVersion}");
+#endif
+                    RemoveById(existingEntry.Id);
+                }
+            }
+
+            var successfulEntries = new Dictionary<string, AtlasEntry>(textures.Count);
+
+            // ✅ OPTIMIZATION: Avoid LINQ - use manual sort with array
+            var sortedList = new List<(string key, Texture2D tex, int area, int version)>(textures.Count);
+            foreach (var kvp in textures)
+            {
+                if (kvp.Value != null)
+                {
+                    int version = versions != null && versions.TryGetValue(kvp.Key, out var v) ? v : 0;
+                    sortedList.Add((kvp.Key, kvp.Value, kvp.Value.width * kvp.Value.height, version));
+                }
+            }
+            
+            // Sort descending by area for better packing
+            sortedList.Sort((a, b) => b.area.CompareTo(a.area));
+
+            // ✅ OPTIMIZATION: Track which pages are modified to only apply those
+            var modifiedPages = new HashSet<int>();
+
+            // Pack all textures WITHOUT applying after each one
+            var successCount = 0;
+            var failCount = 0;
+            var skippedCount = 0;
+            
+            for (var i = 0; i < sortedList.Count; i++)
+            {
+                var (key, tex, _, version) = sortedList[i];
+                
+                // Check if entry with same version already exists (might have been skipped in removal phase)
+                if (_entriesByName.TryGetValue(key, out var existingEntry) && existingEntry.SpriteVersion == version)
+                {
+                    successfulEntries[key] = existingEntry;
+                    skippedCount++;
+#if UNITY_EDITOR
+                    Debug.Log($"[RuntimeAtlas] Batch ['{key}']: Using existing entry with version {version}");
+#endif
+                    continue;
+                }
+                
+                var (result, entry) = AddInternal(tex, version);
+                if (result == AddResult.Success && entry != null)
+                {
+                    // Store in name dictionary
+                    _entriesByName[key] = entry;
+                    successfulEntries[key] = entry;
+                    modifiedPages.Add(entry.TextureIndex);
+                    successCount++;
+#if UNITY_EDITOR
+                    Debug.Log($"[RuntimeAtlas] Batch ['{key}']: Added '{tex.name}' with version {version} -> Entry ID {entry.Id}");
+#endif
+                }
+                else
+                {
+                    failCount++;
+#if UNITY_EDITOR
+                    Debug.LogWarning($"[RuntimeAtlas] Batch ['{key}']: Failed to add '{tex.name}' -> Result: {result}");
+#endif
+                    
+                    // If atlas is full, stop trying to add more
+                    if (result == AddResult.Full)
+                    {
+#if UNITY_EDITOR
+                        Debug.LogWarning($"[RuntimeAtlas] AddBatch: Atlas full after {successCount} textures. Stopping batch.");
+#endif
+                        break;
+                    }
+                }
+            }
+
+            // ✅ OPTIMIZATION: Apply only modified pages instead of all pages
+            if (successCount > 0)
+            {
+                try
+                {
+#if UNITY_EDITOR
+                    Debug.Log($"[RuntimeAtlas] AddBatch: Applying texture changes for {successCount} textures across {modifiedPages.Count} pages (of {_textures.Count} total)");
+#endif
+                    foreach (var pageIndex in modifiedPages)
+                    {
+                        if (pageIndex >= 0 && pageIndex < _textures.Count)
+                        {
+                            _textures[pageIndex].Apply(false, false);
+                        }
+                    }
+                    _isDirty = false;
+                }
+                catch (UnityException ex)
+                {
+#if UNITY_EDITOR
+                    Debug.LogError($"[RuntimeAtlas] Failed to apply batch changes: {ex.Message}");
+#endif
+                }
+
+                // ✅ OPTIMIZATION: Skip validation for large batches
+#if UNITY_EDITOR
+                if (successCount <= 100)
+                {
+                    ValidateNoOverlaps();
+                }
+#endif
+            }
+            
+#if UNITY_EDITOR
+            Debug.Log($"[RuntimeAtlas] AddBatch: Complete. Added: {successCount}, Skipped (existing): {skippedCount}, Failed: {failCount}, Total entries in atlas: {_entries.Count}");
             RuntimeAtlasProfiler.End(profiler);
 #endif
 
@@ -1020,7 +1237,7 @@ namespace RuntimeAtlasPacker
         /// Internal add method that doesn't call Apply - for batch operations
         /// Automatically creates new page if current page is full.
         /// </summary>
-        private (AddResult result, AtlasEntry entry) AddInternal(Texture2D texture)
+        private (AddResult result, AtlasEntry entry) AddInternal(Texture2D texture, int spriteVersion = 0)
         {
             if (texture == null)
             {
@@ -1125,7 +1342,7 @@ namespace RuntimeAtlasPacker
 
             // Create entry with texture index
             var id = GetNextId();
-            var entry = new AtlasEntry(this, id, pageIndex, contentRect, uvRect, texture.name);
+            var entry = new AtlasEntry(this, id, pageIndex, contentRect, uvRect, texture.name, default, default, 100f, spriteVersion);
             _entries[id] = entry;
             
             _version++;
@@ -1143,7 +1360,7 @@ namespace RuntimeAtlasPacker
         /// <summary>
         /// Internal add method with sprite properties that doesn't call Apply - for batch operations
         /// </summary>
-        private (AddResult result, AtlasEntry entry) AddInternal(Texture2D texture, Vector4 border, Vector2 pivot, float pixelsPerUnit)
+        private (AddResult result, AtlasEntry entry) AddInternal(Texture2D texture, Vector4 border, Vector2 pivot, float pixelsPerUnit, int spriteVersion = 0)
         {
             if (texture == null)
             {
@@ -1249,7 +1466,7 @@ namespace RuntimeAtlasPacker
 
             // Create entry with sprite properties
             var id = GetNextId();
-            var entry = new AtlasEntry(this, id, pageIndex, contentRect, uvRect, texture.name, border, pivot, pixelsPerUnit);
+            var entry = new AtlasEntry(this, id, pageIndex, contentRect, uvRect, texture.name, border, pivot, pixelsPerUnit, spriteVersion);
             _entries[id] = entry;
             
 #if UNITY_EDITOR
