@@ -17,6 +17,7 @@ namespace RuntimeAtlasPacker
         private Vector4 _border;
         private Vector2 _pivot;
         private float _pixelsPerUnit;
+        private int _spriteVersion;
 
         // Sprite cache - only stores default sprite (100 PPU, center pivot, no border)
         private Sprite _cachedSprite;
@@ -65,6 +66,9 @@ namespace RuntimeAtlasPacker
         /// <summary>Pixels per unit value of the sprite.</summary>
         public float PixelsPerUnit => _pixelsPerUnit;
         
+        /// <summary>Sprite version number for tracking content changes (default is 0).</summary>
+        public int SpriteVersion => _spriteVersion;
+        
         /// <summary>Version number that increments whenever the UVs change.</summary>
         public int Version => _version;
 
@@ -74,7 +78,7 @@ namespace RuntimeAtlasPacker
         /// <summary>Event fired when this entry's UV coordinates change.</summary>
         public event Action<AtlasEntry> OnUVChanged;
 
-        internal AtlasEntry(RuntimeAtlas atlas, int id, int textureIndex, RectInt pixelRect, Rect uvRect, string name = null, Vector4 border = default, Vector2 pivot = default, float pixelsPerUnit = 100f)
+        internal AtlasEntry(RuntimeAtlas atlas, int id, int textureIndex, RectInt pixelRect, Rect uvRect, string name = null, Vector4 border = default, Vector2 pivot = default, float pixelsPerUnit = 100f, int spriteVersion = 0)
         {
             _atlas = atlas;
             _id = id;
@@ -86,6 +90,7 @@ namespace RuntimeAtlasPacker
             _border = border;
             _pivot = pivot == default ? new Vector2(0.5f, 0.5f) : pivot;
             _pixelsPerUnit = pixelsPerUnit > 0 ? pixelsPerUnit : 100f;
+            _spriteVersion = spriteVersion;
         }
 
         internal void UpdateRect(RectInt newPixelRect, Rect newUVRect)
