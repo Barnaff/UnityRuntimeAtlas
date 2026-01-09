@@ -39,107 +39,28 @@ namespace RuntimeAtlasPacker
 
         private static AtlasEntry[] PackBatchWithJobs(RuntimeAtlas atlas, Texture2D[] textures)
         {
-            int count = textures.Length;
-            var entries = new AtlasEntry[count];
+            // ✅ MEMORY CRASH FIX: The previous implementation had a critical bug where it:
+            // 1. Calculated packing positions using Unity Jobs
+            // 2. Manually blitted textures to the calculated positions
+            // 3. Called atlas.Add() which RE-PACKED and RE-BLITTED everything again!
+            //
+            // This caused:
+            // - Memory crashes from excessive GPU operations
+            // - Texture corruption from double-blitting
+            // - Wasted CPU cycles
+            // - Job results were completely ignored
+            //
+            // The atlas.AddBatch() method already handles all of this correctly with proper
+            // memory management, multi-page support, and growth strategy. There's no benefit
+            // to the Jobs approach when we have to call atlas.Add() anyway.
+            //
+            // If Jobs optimization is needed in the future, it must create AtlasEntry objects
+            // directly without calling atlas.Add(), but that requires internal access.
 
-            // Prepare sizes
-            using var sizes = new NativeArray<int2>(count, Allocator.TempJob);
-            using var indices = new NativeArray<int>(count, Allocator.TempJob);
-            using var results = new NativeArray<int4>(count, Allocator.TempJob);
-            using var freeRects = new NativeList<int4>(64, Allocator.TempJob);
-
-            int padding = atlas.Settings.Padding;
-
-            for (int i = 0; i < count; i++)
-            {
-                var nativeArray = sizes;
-                nativeArray[i] = new int2(
-                    textures[i].width + padding * 2,
-                    textures[i].height + padding * 2
-                );
-            }
-
-            // Sort by area descending
-            var sortJob = new SortByAreaJob
-            {
-                Sizes = sizes,
-                Indices = indices
-            };
-            sortJob.Schedule().Complete();
-
-            // Initialize free rects
-            freeRects.Add(new int4(0, 0, atlas.Width, atlas.Height));
-
-            // Pack sorted
-            var sortedSizes = new NativeArray<int2>(count, Allocator.TempJob);
-            for (int i = 0; i < count; i++)
-            {
-                sortedSizes[i] = sizes[indices[i]];
-            }
-
-            var packJob = new BatchPackJob
-            {
-                Sizes = sortedSizes,
-                Results = results,
-                FreeRects = freeRects,
-                AtlasWidth = atlas.Width,
-                AtlasHeight = atlas.Height
-            };
-            packJob.Schedule().Complete();
-
-            sortedSizes.Dispose();
-
-            // Process results
-            var sortedResults = new int4[count];
-            for (int i = 0; i < count; i++)
-            {
-                sortedResults[indices[i]] = results[i];
-            }
-
-            // Check for failures and grow if needed
-            bool hasFailed = false;
-            for (int i = 0; i < count; i++)
-            {
-                if (sortedResults[i].x < 0)
-                {
-                    hasFailed = true;
-                    break;
-                }
-            }
-
-            if (hasFailed)
-            {
-                // Fallback to sequential add with growth
-                return atlas.AddBatch(textures);
-            }
-
-            // Apply to atlas
-            for (int i = 0; i < count; i++)
-            {
-                var r = sortedResults[i];
-                var contentRect = new RectInt(
-                    r.x + padding,
-                    r.y + padding,
-                    textures[i].width,
-                    textures[i].height
-                );
-
-                TextureBlitter.Blit(textures[i], atlas.Texture, contentRect.x, contentRect.y);
-
-                var uvRect = new Rect(
-                    (float)contentRect.x / atlas.Width,
-                    (float)contentRect.y / atlas.Height,
-                    (float)contentRect.width / atlas.Width,
-                    (float)contentRect.height / atlas.Height
-                );
-
-                // Create entry through atlas
-                var (result, entry) = atlas.Add(textures[i]);
-                entries[i] = entry; // May be null if failed
-            }
-
-            atlas.Apply();
-            return entries;
+#if UNITY_EDITOR
+            Debug.Log($"[AtlasBatchProcessor] Using optimized atlas.AddBatch() for {textures.Length} textures");
+#endif
+            return atlas.AddBatch(textures);
         }
 
         /// <summary>
