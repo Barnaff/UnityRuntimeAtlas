@@ -183,8 +183,25 @@ namespace RuntimeAtlasPacker
 
         /// <summary>
         /// Add a texture to the atlas.
+        /// <para>⚠️ <b>IMPORTANT</b>: This method COPIES the texture data into the atlas.</para>
+        /// <para>If you created or downloaded the input texture, you MUST destroy it after calling this method to avoid memory leaks.</para>
+        /// <para>Textures loaded from Resources or assigned in the Inspector should NOT be destroyed.</para>
         /// </summary>
+        /// <param name="texture">The texture to add to the atlas</param>
         /// <returns>A tuple containing the result status and an AtlasEntry reference (null if not successful).</returns>
+        /// <example>
+        /// <code>
+        /// // Example 1: Downloaded texture (MUST destroy after adding)
+        /// var downloadedTexture = await DownloadTextureAsync(url);
+        /// var (result, entry) = atlas.Add(downloadedTexture);
+        /// Object.Destroy(downloadedTexture); // ← REQUIRED to prevent memory leak!
+        /// 
+        /// // Example 2: Resources texture (DO NOT destroy)
+        /// var resourceTexture = Resources.Load&lt;Texture2D&gt;("MyTexture");
+        /// var (result, entry) = atlas.Add(resourceTexture);
+        /// // Do NOT destroy resourceTexture - Unity manages it
+        /// </code>
+        /// </example>
         public (AddResult result, AtlasEntry entry) Add(Texture2D texture)
         {
             if (_isDisposed)
@@ -258,6 +275,8 @@ namespace RuntimeAtlasPacker
 
         /// <summary>
         /// Add a texture to the atlas with sprite properties for proper recreation.
+        /// <para>⚠️ <b>IMPORTANT</b>: This method COPIES the texture data into the atlas.</para>
+        /// <para>If you created or downloaded the input texture, you MUST destroy it after calling this method to avoid memory leaks.</para>
         /// </summary>
         /// <param name="texture">The texture to add</param>
         /// <param name="border">Border values for 9-slicing (left, bottom, right, top)</param>
@@ -332,6 +351,8 @@ namespace RuntimeAtlasPacker
         /// <summary>
         /// Add a texture to the atlas with a specific name for later retrieval.
         /// If a texture with the same name already exists, it will be replaced.
+        /// <para>⚠️ <b>IMPORTANT</b>: This method COPIES the texture data into the atlas.</para>
+        /// <para>If you created or downloaded the input texture, you MUST destroy it after calling this method to avoid memory leaks.</para>
         /// </summary>
         /// <param name="name">The unique name to associate with this texture</param>
         /// <param name="texture">The texture to add</param>
@@ -599,7 +620,26 @@ namespace RuntimeAtlasPacker
         /// Add multiple textures to the atlas in a single batch.
         /// More efficient than adding one at a time.
         /// Returns only successfully added entries (skips failures).
+        /// <para>⚠️ <b>IMPORTANT</b>: This method COPIES the texture data into the atlas.</para>
+        /// <para>The input textures array is NOT modified. If you created or downloaded these textures, 
+        /// you MUST destroy them after calling this method to avoid memory leaks.</para>
         /// </summary>
+        /// <param name="textures">Array of textures to add</param>
+        /// <returns>Array of successfully added AtlasEntry objects</returns>
+        /// <example>
+        /// <code>
+        /// // Example: Batch add with cleanup
+        /// var downloadedTextures = new Texture2D[10];
+        /// for (int i = 0; i &lt; 10; i++)
+        ///     downloadedTextures[i] = await DownloadTextureAsync(urls[i]);
+        /// 
+        /// var entries = atlas.AddBatch(downloadedTextures);
+        /// 
+        /// // REQUIRED: Destroy input textures to prevent memory leak
+        /// foreach (var tex in downloadedTextures)
+        ///     if (tex != null) Object.Destroy(tex);
+        /// </code>
+        /// </example>
         public AtlasEntry[] AddBatch(Texture2D[] textures)
         {
             if (_isDisposed)
@@ -647,8 +687,26 @@ namespace RuntimeAtlasPacker
         /// More efficient than adding one at a time.
         /// Returns a dictionary mapping keys to successfully added entries (skips failures).
         /// If a texture with the same key already exists, it will be replaced.
+        /// <para>⚠️ <b>IMPORTANT</b>: This method COPIES the texture data into the atlas.</para>
+        /// <para>The input dictionary is NOT modified. If you created or downloaded these textures,
+        /// you MUST destroy them after calling this method to avoid memory leaks.</para>
         /// </summary>
         /// <param name="textures">Dictionary of sprite keys to textures</param>
+        /// <returns>Dictionary mapping keys to successfully added AtlasEntry objects</returns>
+        /// <example>
+        /// <code>
+        /// // Example: Batch add with cleanup
+        /// var textureDict = new Dictionary&lt;string, Texture2D&gt;();
+        /// textureDict["enemy"] = await DownloadTextureAsync(url1);
+        /// textureDict["player"] = await DownloadTextureAsync(url2);
+        /// 
+        /// var entries = atlas.AddBatch(textureDict);
+        /// 
+        /// // REQUIRED: Destroy input textures to prevent memory leak
+        /// foreach (var tex in textureDict.Values)
+        ///     if (tex != null) Object.Destroy(tex);
+        /// </code>
+        /// </example>
         /// <returns>Dictionary mapping keys to successfully added AtlasEntry objects</returns>
         public Dictionary<string, AtlasEntry> AddBatch(Dictionary<string, Texture2D> textures)
         {
@@ -1286,50 +1344,82 @@ namespace RuntimeAtlasPacker
             Debug.Log($"[TryGrowPage] Growing page {pageIndex} from {oldSize}x{oldSize} to {newSize}x{newSize}");
 #endif
 
-            // Create new larger texture
-            var newTexture = new Texture2D(newSize, newSize, _settings.Format, _settings.GenerateMipMaps);
-            newTexture.filterMode = _settings.FilterMode;
-            newTexture.wrapMode = TextureWrapMode.Clamp;
-            newTexture.name = $"RuntimeAtlas_Page{pageIndex}";
-
-            // Clear to transparent
-            var clearPixels = new Color32[newSize * newSize];
-            newTexture.SetPixels32(clearPixels);
-            newTexture.Apply(false, false);
-
-            // Copy old texture data
-            Graphics.CopyTexture(oldTexture, 0, 0, 0, 0, oldSize, oldSize, newTexture, 0, 0, 0, 0);
-
-            // Update packer
-            _packers[pageIndex].Resize(newSize, newSize);
-
-            // Replace texture
-            UnityEngine.Object.Destroy(oldTexture);
-            _textures[pageIndex] = newTexture;
-
-            // Update UVs for all entries on this page
-            foreach (var entry in _entries.Values)
+            Texture2D newTexture = null;
+            try
             {
-                if (entry.TextureIndex == pageIndex)
+                // Create new larger texture
+                newTexture = new Texture2D(newSize, newSize, _settings.Format, _settings.GenerateMipMaps);
+                newTexture.filterMode = _settings.FilterMode;
+                newTexture.wrapMode = TextureWrapMode.Clamp;
+                newTexture.name = $"RuntimeAtlas_Page{pageIndex}";
+
+                // Clear to transparent
+                var clearPixels = new Color32[newSize * newSize];
+                newTexture.SetPixels32(clearPixels);
+                newTexture.Apply(false, false);
+
+                // Copy old texture data
+                Graphics.CopyTexture(oldTexture, 0, 0, 0, 0, oldSize, oldSize, newTexture, 0, 0, 0, 0);
+
+                // Update packer
+                _packers[pageIndex].Resize(newSize, newSize);
+
+                // MEMORY LEAK FIX: Destroy old texture BEFORE replacing reference
+                if (Application.isPlaying)
                 {
-                    // ✅ FIX: Ensure float division for precision
-                    var uvRect = new Rect(
-                        (float)entry.Rect.x / (float)newSize,
-                        (float)entry.Rect.y / (float)newSize,
-                        (float)entry.Rect.width / (float)newSize,
-                        (float)entry.Rect.height / (float)newSize
-                    );
-                    entry.UpdateRect(entry.Rect, uvRect);
-                    OnEntryUpdated?.Invoke(this, entry);
+                    UnityEngine.Object.Destroy(oldTexture);
                 }
-            }
+                else
+                {
+                    UnityEngine.Object.DestroyImmediate(oldTexture);
+                }
+
+                // Replace texture
+                _textures[pageIndex] = newTexture;
+
+                // Update UVs for all entries on this page
+                foreach (var entry in _entries.Values)
+                {
+                    if (entry.TextureIndex == pageIndex)
+                    {
+                        // ✅ FIX: Ensure float division for precision
+                        var uvRect = new Rect(
+                            (float)entry.Rect.x / (float)newSize,
+                            (float)entry.Rect.y / (float)newSize,
+                            (float)entry.Rect.width / (float)newSize,
+                            (float)entry.Rect.height / (float)newSize
+                        );
+                        entry.UpdateRect(entry.Rect, uvRect);
+                        OnEntryUpdated?.Invoke(this, entry);
+                    }
+                }
 
 #if UNITY_EDITOR
-            Debug.Log($"[TryGrowPage] Page {pageIndex} grown successfully to {newSize}x{newSize}");
+                Debug.Log($"[TryGrowPage] Page {pageIndex} grown successfully to {newSize}x{newSize}");
 #endif
-            OnAtlasResized?.Invoke(this);
+                OnAtlasResized?.Invoke(this);
 
-            return true;
+                return true;
+            }
+            catch (Exception ex)
+            {
+#if UNITY_EDITOR
+                Debug.LogError($"[TryGrowPage] Failed to grow page {pageIndex}: {ex.Message}");
+#endif
+                // MEMORY LEAK FIX: Clean up new texture if creation failed
+                if (newTexture != null)
+                {
+                    if (Application.isPlaying)
+                    {
+                        UnityEngine.Object.Destroy(newTexture);
+                    }
+                    else
+                    {
+                        UnityEngine.Object.DestroyImmediate(newTexture);
+                    }
+                }
+                return false;
+            }
         }
 
         /// <summary>

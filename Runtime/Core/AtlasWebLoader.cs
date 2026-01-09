@@ -286,6 +286,8 @@ namespace RuntimeAtlasPacker
             string name, 
             CancellationToken cancellationToken)
         {
+            Texture2D downloadedTexture = null;
+            
             try
             {
                 using (var request = UnityWebRequestTexture.GetTexture(url))
@@ -306,9 +308,13 @@ namespace RuntimeAtlasPacker
 
                     if (request.result == UnityWebRequest.Result.Success)
                     {
-                        var texture = DownloadHandlerTexture.GetContent(request);
-                        texture.name = name;
-                        return (name, texture);
+                        downloadedTexture = DownloadHandlerTexture.GetContent(request);
+                        downloadedTexture.name = name;
+                        
+                        // Return texture - caller is responsible for cleanup
+                        var result = (name, downloadedTexture);
+                        downloadedTexture = null; // Transfer ownership to caller
+                        return result;
                     }
                     else
                     {
@@ -322,10 +328,20 @@ namespace RuntimeAtlasPacker
                 Debug.LogError($"[AtlasWebLoader] Exception downloading {url}: {ex.Message}");
                 return (name, null);
             }
+            finally
+            {
+                // MEMORY LEAK FIX: Clean up texture if we still own it (error path)
+                if (downloadedTexture != null)
+                {
+                    UnityEngine.Object.Destroy(downloadedTexture);
+                }
+            }
         }
 
         private async Task ProcessDownloadAsync(LoadRequest request, CancellationToken cancellationToken)
         {
+            Texture2D downloadedTexture = null;
+            
             try
             {
                 // Download texture
@@ -349,11 +365,11 @@ namespace RuntimeAtlasPacker
 
                     if (webRequest.result == UnityWebRequest.Result.Success)
                     {
-                        var texture = DownloadHandlerTexture.GetContent(webRequest);
-                        texture.name = request.SpriteName;
+                        downloadedTexture = DownloadHandlerTexture.GetContent(webRequest);
+                        downloadedTexture.name = request.SpriteName;
 
                         // Add to atlas
-                        var (result, entry) = _atlas.Add(request.SpriteName, texture);
+                        var (result, entry) = _atlas.Add(request.SpriteName, downloadedTexture);
 
                         if (result == AddResult.Success && entry != null && entry.IsValid)
                         {
@@ -382,9 +398,6 @@ namespace RuntimeAtlasPacker
                             request.SetFailed($"Failed to add to atlas: {result}");
                             OnDownloadFailed?.Invoke(request.Url, result.ToString());
                         }
-
-                        // Cleanup downloaded texture (not the atlas texture!)
-                        UnityEngine.Object.Destroy(texture);
                     }
                     else
                     {
@@ -400,6 +413,12 @@ namespace RuntimeAtlasPacker
             }
             finally
             {
+                // MEMORY LEAK FIX: Always cleanup downloaded texture, even on exception
+                if (downloadedTexture != null)
+                {
+                    UnityEngine.Object.Destroy(downloadedTexture);
+                }
+                
                 // Remove from active requests
                 lock (_activeRequests)
                 {

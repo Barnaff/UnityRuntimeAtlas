@@ -444,43 +444,64 @@ namespace RuntimeAtlasPacker
             // Create atlas with loaded settings
             var settings = data.Settings.ToSettings();
             var atlas = new RuntimeAtlas(settings);
+            var loadedTextures = new List<Texture2D>();
 
-            // Load and add texture pages directly
-            for (var i = 0; i < data.Pages.Count; i++)
+            try
             {
-                var pageData = data.Pages[i];
-
-                // Load PNG file directly
-                var texturePath = $"{baseFilePath}_page{i}.png";
-                var pngData = File.ReadAllBytes(texturePath);
-
-                // Create texture from PNG data
-                var texture = new Texture2D(2, 2, settings.Format, settings.GenerateMipMaps);
-                texture.filterMode = settings.FilterMode;
-                texture.wrapMode = TextureWrapMode.Clamp;
-                texture.name = $"RuntimeAtlas_Page{i}_Loaded";
-
-                if (!texture.LoadImage(pngData))
+                // Load and add texture pages directly
+                for (var i = 0; i < data.Pages.Count; i++)
                 {
-                    Debug.LogError($"[AtlasPersistence] Failed to load texture for page {i}");
-                    UnityEngine.Object.Destroy(texture);
-                    continue;
+                    var pageData = data.Pages[i];
+
+                    // Load PNG file directly
+                    var texturePath = $"{baseFilePath}_page{i}.png";
+                    var pngData = File.ReadAllBytes(texturePath);
+
+                    // Create texture from PNG data
+                    var texture = new Texture2D(2, 2, settings.Format, settings.GenerateMipMaps);
+                    texture.filterMode = settings.FilterMode;
+                    texture.wrapMode = TextureWrapMode.Clamp;
+                    texture.name = $"RuntimeAtlas_Page{i}_Loaded";
+
+                    if (!texture.LoadImage(pngData))
+                    {
+                        Debug.LogError($"[AtlasPersistence] Failed to load texture for page {i}");
+                        UnityEngine.Object.Destroy(texture);
+                        continue;
+                    }
+
+                    texture.Apply(false, false);
+                    loadedTextures.Add(texture);
+
+                    // Add loaded page to atlas using reflection (only once per page)
+                    AddLoadedPageToAtlas(atlas, texture, pageData.PackerState);
                 }
 
-                texture.Apply(false, false);
-
-                // Add loaded page to atlas using reflection (only once per page)
-                AddLoadedPageToAtlas(atlas, texture, pageData.PackerState);
-            }
-
-            // Reconstruct entries using reflection (necessary for internal constructor)
-            RestoreAtlasEntries(atlas, data);
+                // Reconstruct entries using reflection (necessary for internal constructor)
+                RestoreAtlasEntries(atlas, data);
 
 #if UNITY_EDITOR
-            Debug.Log($"[AtlasPersistence] Restored atlas with {data.Entries.Count} entries across {data.Pages.Count} pages");
+                Debug.Log($"[AtlasPersistence] Restored atlas with {data.Entries.Count} entries across {data.Pages.Count} pages");
 #endif
 
-            return atlas;
+                return atlas;
+            }
+            catch (Exception ex)
+            {
+                // MEMORY LEAK FIX: Clean up any loaded textures on failure
+                Debug.LogError($"[AtlasPersistence] Failed to deserialize atlas: {ex.Message}");
+                foreach (var texture in loadedTextures)
+                {
+                    if (texture != null)
+                    {
+                        UnityEngine.Object.Destroy(texture);
+                    }
+                }
+                
+                // Dispose the atlas to clean up any partial state
+                atlas?.Dispose();
+                return null;
+            }
         }
 
         /// <summary>
@@ -492,47 +513,68 @@ namespace RuntimeAtlasPacker
             // Create atlas with loaded settings
             var settings = data.Settings.ToSettings();
             var atlas = new RuntimeAtlas(settings);
+            var loadedTextures = new List<Texture2D>();
 
-            // Create textures from pre-loaded PNG data
-            for (var i = 0; i < data.Pages.Count; i++)
+            try
             {
-                var pageData = data.Pages[i];
-
-                // Find corresponding PNG data
-                var pngDataTuple = pngDataList.Find(x => x.index == i);
-                if (pngDataTuple.data == null)
+                // Create textures from pre-loaded PNG data
+                for (var i = 0; i < data.Pages.Count; i++)
                 {
-                    Debug.LogError($"[AtlasPersistence] Missing PNG data for page {i}");
-                    continue;
+                    var pageData = data.Pages[i];
+
+                    // Find corresponding PNG data
+                    var pngDataTuple = pngDataList.Find(x => x.index == i);
+                    if (pngDataTuple.data == null)
+                    {
+                        Debug.LogError($"[AtlasPersistence] Missing PNG data for page {i}");
+                        continue;
+                    }
+
+                    // Create texture from PNG data
+                    var texture = new Texture2D(2, 2, settings.Format, settings.GenerateMipMaps);
+                    texture.filterMode = settings.FilterMode;
+                    texture.wrapMode = TextureWrapMode.Clamp;
+                    texture.name = $"RuntimeAtlas_Page{i}_Loaded";
+
+                    if (!texture.LoadImage(pngDataTuple.data))
+                    {
+                        Debug.LogError($"[AtlasPersistence] Failed to load texture for page {i}");
+                        UnityEngine.Object.Destroy(texture);
+                        continue;
+                    }
+
+                    texture.Apply(false, false);
+                    loadedTextures.Add(texture);
+
+                    // Add loaded page to atlas using reflection (only once per page)
+                    AddLoadedPageToAtlas(atlas, texture, pageData.PackerState);
                 }
 
-                // Create texture from PNG data
-                var texture = new Texture2D(2, 2, settings.Format, settings.GenerateMipMaps);
-                texture.filterMode = settings.FilterMode;
-                texture.wrapMode = TextureWrapMode.Clamp;
-                texture.name = $"RuntimeAtlas_Page{i}_Loaded";
-
-                if (!texture.LoadImage(pngDataTuple.data))
-                {
-                    Debug.LogError($"[AtlasPersistence] Failed to load texture for page {i}");
-                    UnityEngine.Object.Destroy(texture);
-                    continue;
-                }
-
-                texture.Apply(false, false);
-
-                // Add loaded page to atlas using reflection (only once per page)
-                AddLoadedPageToAtlas(atlas, texture, pageData.PackerState);
-            }
-
-            // Reconstruct entries using reflection (necessary for internal constructor)
-            RestoreAtlasEntries(atlas, data);
+                // Reconstruct entries using reflection (necessary for internal constructor)
+                RestoreAtlasEntries(atlas, data);
 
 #if UNITY_EDITOR
-            Debug.Log($"[AtlasPersistence] Restored atlas with {data.Entries.Count} entries across {data.Pages.Count} pages");
+                Debug.Log($"[AtlasPersistence] Restored atlas with {data.Entries.Count} entries across {data.Pages.Count} pages");
 #endif
 
-            return atlas;
+                return atlas;
+            }
+            catch (Exception ex)
+            {
+                // MEMORY LEAK FIX: Clean up any loaded textures on failure
+                Debug.LogError($"[AtlasPersistence] Failed to deserialize atlas from data: {ex.Message}");
+                foreach (var texture in loadedTextures)
+                {
+                    if (texture != null)
+                    {
+                        UnityEngine.Object.Destroy(texture);
+                    }
+                }
+                
+                // Dispose the atlas to clean up any partial state
+                atlas?.Dispose();
+                return null;
+            }
         }
 
         /// <summary>
@@ -593,11 +635,21 @@ namespace RuntimeAtlasPacker
                 var textures = texturesField.GetValue(atlas) as List<Texture2D>;
                 if (textures != null)
                 {
-                    // Remove the default empty texture if this is the first loaded page
+                    // MEMORY LEAK FIX: Remove the default empty texture if this is the first loaded page
                     if (textures.Count == 1 && textures[0] != null && textures[0].width == atlas.Settings.InitialSize && atlas.EntryCount == 0)
                     {
-                        UnityEngine.Object.Destroy(textures[0]);
+                        var oldTexture = textures[0];
                         textures.Clear();
+                        
+                        // Properly destroy in both play and edit mode
+                        if (UnityEngine.Application.isPlaying)
+                        {
+                            UnityEngine.Object.Destroy(oldTexture);
+                        }
+                        else
+                        {
+                            UnityEngine.Object.DestroyImmediate(oldTexture);
+                        }
                         
 #if UNITY_EDITOR
                         Debug.Log("[AtlasPersistence] Removed default empty page before loading");
@@ -614,7 +666,7 @@ namespace RuntimeAtlasPacker
                 var packers = packersField.GetValue(atlas) as List<IPackingAlgorithm>;
                 if (packers != null)
                 {
-                    // Remove the default packer if this is the first loaded page
+                    // MEMORY LEAK FIX: Remove the default packer if this is the first loaded page
                     if (packers.Count == 1 && atlas.EntryCount == 0)
                     {
                         packers[0]?.Dispose();
