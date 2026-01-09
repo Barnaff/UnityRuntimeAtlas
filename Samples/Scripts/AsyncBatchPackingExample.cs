@@ -81,10 +81,10 @@ namespace RuntimeAtlasPacker.Samples
             // Step 2: Pack textures using async method
             UpdateStatus($"Packing {textureCount} textures asynchronously ({texturesPerFrame} per frame)...");
             UpdateProgress(0f);
-            
+
             var textures = _generatedTextures.ToArray();
             AtlasEntry[] results = null;
-            
+
             yield return StartCoroutine(
                 AtlasPacker.PackBatchAsync(
                     textures,
@@ -96,7 +96,19 @@ namespace RuntimeAtlasPacker.Samples
                     texturesPerFrame: texturesPerFrame
                 )
             );
-            
+
+            // ✅ MEMORY LEAK FIX: Destroy textures immediately after packing
+            // The atlas copies texture data, so the original textures are no longer needed
+            // Keeping them around wastes memory until OnDestroy() is called
+            foreach (var texture in _generatedTextures)
+            {
+                if (texture != null)
+                {
+                    Destroy(texture);
+                }
+            }
+            _generatedTextures.Clear();
+
             // Step 3: Show results
             int packedCount = AtlasPacker.Default.EntryCount;
             UpdateStatus($"Complete! Packed {packedCount} textures. FPS should remain stable.");
@@ -205,14 +217,24 @@ namespace RuntimeAtlasPacker.Samples
                 Debug.LogWarning("No textures generated yet!");
                 return;
             }
-            
+
             Debug.Log($"[AsyncBatchPackingExample] Packing {_generatedTextures.Count} textures synchronously...");
             var sw = System.Diagnostics.Stopwatch.StartNew();
-            
+
             var entries = AtlasPacker.PackBatch(_generatedTextures.ToArray());
-            
+
             sw.Stop();
             Debug.Log($"[AsyncBatchPackingExample] Sync pack complete in {sw.ElapsedMilliseconds}ms. Packed: {entries.Length}");
+
+            // ✅ MEMORY LEAK FIX: Destroy textures immediately after packing
+            foreach (var texture in _generatedTextures)
+            {
+                if (texture != null)
+                {
+                    Destroy(texture);
+                }
+            }
+            _generatedTextures.Clear();
         }
 
         [ContextMenu("Clear Atlas")]
