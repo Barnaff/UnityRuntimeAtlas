@@ -161,9 +161,20 @@ Shader ""Hidden/RuntimeAtlasPacker/Blit""
                 GL.PopMatrix();
                 RenderTexture.active = null;
                 
-                // ✅ CRITICAL FIX: Use Graphics.CopyTexture instead of ReadPixels
-                // This works on GPU without requiring readable textures!
-                Graphics.CopyTexture(rt, target);
+                // ✅ CRITICAL FIX: Different approach for readable vs non-readable textures
+                if (target.isReadable)
+                {
+                    // For READABLE textures: Use ReadPixels to update CPU memory
+                    RenderTexture.active = rt;
+                    target.ReadPixels(new Rect(0, 0, rt.width, rt.height), 0, 0, false);
+                    RenderTexture.active = null;
+                    // Note: Apply() will be called by the caller (RuntimeAtlas)
+                }
+                else
+                {
+                    // For NON-READABLE textures: Use Graphics.CopyTexture (GPU-only)
+                    Graphics.CopyTexture(rt, target);
+                }
             }
             catch (System.Exception ex)
             {
@@ -268,9 +279,26 @@ Shader ""Hidden/RuntimeAtlasPacker/Blit""
                 
                 RenderTexture.active = null;
                 
-                // ✅ CRITICAL FIX: Use Graphics.CopyTexture instead of ReadPixels
-                // This works on GPU without requiring readable textures!
-                Graphics.CopyTexture(rt, target);
+                // ✅ CRITICAL FIX: Different approach for readable vs non-readable textures
+                if (target.isReadable)
+                {
+#if UNITY_EDITOR
+                    Debug.Log($"[TextureBlitter.BlitWithMaterial] Readable texture detected - using ReadPixels. Target: {target.name}, Size: {target.width}x{target.height}");
+#endif
+                    // For READABLE textures: Use ReadPixels to update CPU memory
+                    RenderTexture.active = rt;
+                    target.ReadPixels(new Rect(0, 0, rt.width, rt.height), 0, 0, false);
+                    RenderTexture.active = null;
+                    // Note: Apply() will be called by the caller (RuntimeAtlas)
+                }
+                else
+                {
+#if UNITY_EDITOR
+                    Debug.Log($"[TextureBlitter.BlitWithMaterial] Non-readable texture detected - using Graphics.CopyTexture. Target: {target.name}, Size: {target.width}x{target.height}");
+#endif
+                    // For NON-READABLE textures: Use Graphics.CopyTexture (GPU-only)
+                    Graphics.CopyTexture(rt, target);
+                }
             }
             catch (System.Exception ex)
             {

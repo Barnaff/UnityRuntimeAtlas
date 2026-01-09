@@ -258,8 +258,14 @@ namespace RuntimeAtlasPacker
                     var pageTexture = _textures[entry.TextureIndex];
                     // ✅ MEMORY FIX: Use makeNoLongerReadable to free CPU memory immediately
                     bool makeNoLongerReadable = !_settings.Readable;
+#if UNITY_EDITOR
+                    Debug.Log($"[RuntimeAtlas] Applying texture changes: Readable={_settings.Readable}, makeNoLongerReadable={makeNoLongerReadable}, TextureReadable={pageTexture.isReadable}");
+#endif
                     pageTexture.Apply(false, makeNoLongerReadable);
                     _isDirty = false;
+#if UNITY_EDITOR
+                    Debug.Log($"[RuntimeAtlas] After Apply: TextureReadable={pageTexture.isReadable}");
+#endif
                 }
                 catch (UnityException ex)
                 {

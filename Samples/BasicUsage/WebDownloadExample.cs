@@ -14,6 +14,7 @@ namespace RuntimeAtlasPacker.Samples
     /// <summary>
     /// Example demonstrating downloading images from URLs and dynamically adding/removing them from atlases.
     /// Supports batch downloads and automatically creates new atlases when the current one is full.
+    /// Last modified: 2026-01-09 - Added diagnostic logging
     /// </summary>
     public class WebDownloadExample : MonoBehaviour
     {
@@ -133,11 +134,20 @@ namespace RuntimeAtlasPacker.Samples
 
         private async Task LoadInitialImages()
         {
-            Debug.Log($"[WebDownload] Loading {initialImageCount} initial images...");
+            Debug.Log($"[WebDownload] LoadInitialImages: Starting to load {initialImageCount} initial images...");
 
             for (int i = 0; i < initialImageCount; i++)
             {
-                await AddNewImage();
+                Debug.Log($"[WebDownload] LoadInitialImages: Loading image {i + 1}/{initialImageCount}");
+                try
+                {
+                    await AddNewImage();
+                    Debug.Log($"[WebDownload] LoadInitialImages: Image {i + 1} completed");
+                }
+                catch (Exception ex)
+                {
+                    Debug.LogError($"[WebDownload] LoadInitialImages: Exception loading image {i + 1}: {ex.Message}\n{ex.StackTrace}");
+                }
             }
 
             // Get overflow count based on which atlas we're using
@@ -145,7 +155,7 @@ namespace RuntimeAtlasPacker.Samples
                 ? AtlasPacker.GetOverflowCount(_activeAtlasName)
                 : AtlasPacker.GetDefaultOverflowCount();
                 
-            Debug.Log($"[WebDownload] Initialized with {overflowCount + 1} atlas(es), Total images: {_imageDataList.Count}");
+            Debug.Log($"[WebDownload] LoadInitialImages: COMPLETE - Initialized with {overflowCount + 1} atlas(es), Total images: {_imageDataList.Count}");
         }
 
         private IEnumerator AddImageTimer()
@@ -188,20 +198,34 @@ namespace RuntimeAtlasPacker.Samples
 
         private async Task AddNewImage()
         {
+            Debug.Log($"[WebDownload] AddNewImage: START");
+            
             string url = GetRandomImageUrl(_imageCounter++);
+            Debug.Log($"[WebDownload] AddNewImage: Downloading from URL: {url}");
+            
             var texture = await DownloadImageAsync(url, _cts.Token);
             
-            if (texture == null) return;
+            Debug.Log($"[WebDownload] AddNewImage: Download complete. Texture = {texture != null}, Size = {texture?.width}x{texture?.height}");
+            
+            if (texture == null)
+            {
+                Debug.LogWarning($"[WebDownload] AddNewImage: Download failed, texture is null");
+                return;
+            }
 
             // Use configured atlas (named or default)
             AtlasEntry entry;
+            Debug.Log($"[WebDownload] AddNewImage: Packing texture into atlas...");
+            
             if (!string.IsNullOrEmpty(_activeAtlasName))
             {
                 entry = AtlasPacker.Pack(_activeAtlasName, texture);
+                Debug.Log($"[WebDownload] Packed to named atlas '{_activeAtlasName}': Entry={entry != null}, IsValid={entry?.IsValid}, Texture={entry?.Texture != null}");
             }
             else
             {
                 entry = AtlasPacker.Pack(texture);
+                Debug.Log($"[WebDownload] Packed to default atlas: Entry={entry != null}, IsValid={entry?.IsValid}, Texture={entry?.Texture != null}");
             }
             
             Destroy(texture);
@@ -211,8 +235,24 @@ namespace RuntimeAtlasPacker.Samples
                 Debug.LogWarning($"[WebDownload] Failed to pack texture - atlas may be at page limit!");
                 return;
             }
+            
+            if (!entry.IsValid)
+            {
+                Debug.LogError($"[WebDownload] Entry created but IsValid=false! Texture={entry.Texture != null}, Width={entry.Width}, Height={entry.Height}");
+                return;
+            }
+            
+            Debug.Log($"[WebDownload] AddNewImage: Creating UI object for entry...");
 
             var go = CreateImageObject(entry);
+            
+            if (go == null)
+            {
+                Debug.LogError($"[WebDownload] Failed to create image object!");
+                return;
+            }
+            
+            Debug.Log($"[WebDownload] AddNewImage: UI object created: {go.name}");
             
             _imageDataList.Add(new ImageData
             {
@@ -368,35 +408,44 @@ namespace RuntimeAtlasPacker.Samples
 
         private async Task<Texture2D> DownloadImageAsync(string url, CancellationToken ct)
         {
+            Debug.Log($"[WebDownload] DownloadImageAsync: Starting download from {url}");
+            
             try
             {
                 using var request = UnityWebRequestTexture.GetTexture(url);
                 
+                Debug.Log($"[WebDownload] DownloadImageAsync: Sending web request...");
                 var operation = request.SendWebRequest();
                 
                 while (!operation.isDone)
                 {
                     if (ct.IsCancellationRequested)
                     {
+                        Debug.LogWarning($"[WebDownload] DownloadImageAsync: Cancelled");
                         request.Abort();
                         return null;
                     }
                     await Task.Yield();
                 }
 
+                Debug.Log($"[WebDownload] DownloadImageAsync: Request complete. Result: {request.result}");
+
                 if (request.result != UnityWebRequest.Result.Success)
                 {
-                    Debug.LogWarning($"Failed to download {url}: {request.error}");
+                    Debug.LogWarning($"[WebDownload] Failed to download {url}: {request.error}");
                     return null;
                 }
 
                 var texture = DownloadHandlerTexture.GetContent(request);
                 texture.name = $"WebImage_{url.GetHashCode():X8}";
+                
+                Debug.Log($"[WebDownload] DownloadImageAsync: SUCCESS - Texture: {texture.name}, Size: {texture.width}x{texture.height}");
+                
                 return texture;
             }
             catch (Exception e)
             {
-                Debug.LogWarning($"Exception downloading {url}: {e.Message}");
+                Debug.LogError($"[WebDownload] Exception downloading {url}: {e.Message}\n{e.StackTrace}");
                 return null;
             }
         }

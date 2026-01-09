@@ -8,6 +8,7 @@ namespace RuntimeAtlasPacker
     /// <summary>
     /// Self-contained UI Image that automatically binds to atlas entries.
     /// Replaces standard Image component with built-in atlas support.
+    /// Last modified: 2026-01-09 - Added diagnostic logging
     /// </summary>
     [ExecuteAlways]
     [DisallowMultipleComponent]
@@ -144,6 +145,10 @@ namespace RuntimeAtlasPacker
                 return this;
             }
             
+#if UNITY_EDITOR
+            Debug.Log($"[AtlasImage] SetEntry called: Name={entry.Name}, IsValid={entry.IsValid}, Texture={entry.Texture != null}, Size={entry.Width}x{entry.Height}");
+#endif
+            
             if (_entry == entry)
             {
                 return this;
@@ -161,6 +166,10 @@ namespace RuntimeAtlasPacker
                     _entry.Atlas.OnAtlasResized += OnAtlasResized;
                 }
                 UpdateSprite();
+                
+#if UNITY_EDITOR
+                Debug.Log($"[AtlasImage] Sprite updated: Sprite={_managedSprite != null}, SpriteTexture={_managedSprite?.texture != null}");
+#endif
             }
             else
             {
@@ -407,11 +416,21 @@ namespace RuntimeAtlasPacker
 
             if (_entry == null || !_entry.IsValid)
             {
+#if UNITY_EDITOR
+                if (_entry != null)
+                {
+                    Debug.LogWarning($"[AtlasImage] OnPopulateMesh: Entry invalid. Entry.IsValid={_entry.IsValid}, Texture={_entry.Texture != null}");
+                }
+#endif
                 return;
             }
 
             var rect = GetPixelAdjustedRect();
             var uv = _entry.UV;
+            
+#if UNITY_EDITOR
+            Debug.Log($"[AtlasImage] OnPopulateMesh: Rect={rect}, UV={uv}, Entry.Texture={_entry.Texture != null}, TextureSize={_entry.Texture?.width}x{_entry.Texture?.height}");
+#endif
 
             if (_preserveAspect && _entry.Width > 0 && _entry.Height > 0)
             {
@@ -442,6 +461,10 @@ namespace RuntimeAtlasPacker
                     GenerateSimpleSprite(vh, rect, uv, color32);
                     break;
             }
+            
+#if UNITY_EDITOR
+            Debug.Log($"[AtlasImage] OnPopulateMesh complete: VertexCount={vh.currentVertCount}");
+#endif
         }
 
         private void PreserveAspectRatio(ref Rect rect)

@@ -26,7 +26,11 @@ namespace RuntimeAtlasPacker
         /// <summary>Whether to use mipmaps.</summary>
         public bool GenerateMipMaps;
         
-        /// <summary>Whether to make texture readable (required for CPU access but uses more memory).</summary>
+        /// <summary>
+        /// Whether to make texture readable (required for CPU access but uses more memory).
+        /// Default: true for safety and backwards compatibility.
+        /// Set to false for mobile devices to save 50% memory.
+        /// </summary>
         public bool Readable;
         
         /// <summary>Growth strategy when atlas is full.</summary>
@@ -52,7 +56,7 @@ namespace RuntimeAtlasPacker
             Format = TextureFormat.RGBA32,
             FilterMode = FilterMode.Bilinear,
             GenerateMipMaps = false,
-            Readable = false,
+            Readable = true,  // ✅ Safe default - set to false for mobile to save memory
             GrowthStrategy = GrowthStrategy.Double,
             Algorithm = PackingAlgorithm.MaxRects,
             MaxPageCount = -1, // Unlimited pages by default
@@ -68,7 +72,7 @@ namespace RuntimeAtlasPacker
             Format = TextureFormat.RGBA32,
             FilterMode = FilterMode.Bilinear,
             GenerateMipMaps = false,
-            Readable = false,
+            Readable = false,  // ✅ Memory optimized - saves 50% memory on mobile
             GrowthStrategy = GrowthStrategy.Double,
             Algorithm = PackingAlgorithm.Skyline,
             EnableSpriteCache = true
@@ -82,7 +86,7 @@ namespace RuntimeAtlasPacker
             Format = TextureFormat.RGBA32,
             FilterMode = FilterMode.Trilinear,
             GenerateMipMaps = true,
-            Readable = false,
+            Readable = true,  // ✅ High quality preset - readable for flexibility
             GrowthStrategy = GrowthStrategy.Double,
             Algorithm = PackingAlgorithm.MaxRects,
             EnableSpriteCache = true
