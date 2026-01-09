@@ -256,7 +256,9 @@ namespace RuntimeAtlasPacker
                 try
                 {
                     var pageTexture = _textures[entry.TextureIndex];
-                    pageTexture.Apply(false, false);
+                    // ✅ MEMORY FIX: Use makeNoLongerReadable to free CPU memory immediately
+                    bool makeNoLongerReadable = !_settings.Readable;
+                    pageTexture.Apply(false, makeNoLongerReadable);
                     _isDirty = false;
                 }
                 catch (UnityException ex)
@@ -334,7 +336,9 @@ namespace RuntimeAtlasPacker
                 try
                 {
                     var pageTexture = _textures[entry.TextureIndex];
-                    pageTexture.Apply(false, false);
+                    // ✅ MEMORY FIX: Use makeNoLongerReadable to free CPU memory immediately
+                    bool makeNoLongerReadable = !_settings.Readable;
+                    pageTexture.Apply(false, makeNoLongerReadable);
                     _isDirty = false;
                 }
                 catch (UnityException ex)
@@ -839,11 +843,14 @@ namespace RuntimeAtlasPacker
 #if UNITY_EDITOR
                     Debug.Log($"[RuntimeAtlas] AddBatch: Applying texture changes for {successCount} textures across {modifiedPages.Count} pages (of {_textures.Count} total)");
 #endif
+                    // ✅ MEMORY FIX: Use makeNoLongerReadable to free CPU memory immediately on non-readable atlases
+                    bool makeNoLongerReadable = !_settings.Readable;
+                    
                     foreach (var pageIndex in modifiedPages)
                     {
                         if (pageIndex >= 0 && pageIndex < _textures.Count)
                         {
-                            _textures[pageIndex].Apply(false, false);
+                            _textures[pageIndex].Apply(false, makeNoLongerReadable);
                         }
                     }
                     _isDirty = false;
@@ -1027,11 +1034,14 @@ namespace RuntimeAtlasPacker
 #if UNITY_EDITOR
                     Debug.Log($"[RuntimeAtlas] AddBatch: Applying texture changes for {successCount} textures across {modifiedPages.Count} pages (of {_textures.Count} total)");
 #endif
+                    // ✅ MEMORY FIX: Use makeNoLongerReadable to free CPU memory immediately on non-readable atlases
+                    bool makeNoLongerReadable = !_settings.Readable;
+                    
                     foreach (var pageIndex in modifiedPages)
                     {
                         if (pageIndex >= 0 && pageIndex < _textures.Count)
                         {
-                            _textures[pageIndex].Apply(false, false);
+                            _textures[pageIndex].Apply(false, makeNoLongerReadable);
                         }
                     }
                     _isDirty = false;
@@ -1059,6 +1069,7 @@ namespace RuntimeAtlasPacker
 
             return successfulEntries;
         }
+
 
         /// <summary>
         /// Download images from remote URLs and add them as a batch to the atlas.
@@ -1573,7 +1584,9 @@ namespace RuntimeAtlasPacker
                 // Clear to transparent
                 var clearPixels = new Color32[newSize * newSize];
                 newTexture.SetPixels32(clearPixels);
-                newTexture.Apply(false, false);
+                // ✅ MEMORY FIX: Use makeNoLongerReadable to free CPU memory immediately
+                bool makeNoLongerReadable = !_settings.Readable;
+                newTexture.Apply(false, makeNoLongerReadable);
 
                 // Copy old texture data
                 Graphics.CopyTexture(oldTexture, 0, 0, 0, 0, oldSize, oldSize, newTexture, 0, 0, 0, 0);

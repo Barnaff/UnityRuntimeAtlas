@@ -161,11 +161,9 @@ Shader ""Hidden/RuntimeAtlasPacker/Blit""
                 GL.PopMatrix();
                 RenderTexture.active = null;
                 
-                // Copy result back to target texture ONCE
-                RenderTexture.active = rt;
-                target.ReadPixels(new Rect(0, 0, rt.width, rt.height), 0, 0, false);
-                target.Apply(false, false);
-                RenderTexture.active = null;
+                // ✅ CRITICAL FIX: Use Graphics.CopyTexture instead of ReadPixels
+                // This works on GPU without requiring readable textures!
+                Graphics.CopyTexture(rt, target);
             }
             catch (System.Exception ex)
             {
@@ -206,6 +204,7 @@ Shader ""Hidden/RuntimeAtlasPacker/Blit""
         /// <summary>
         /// Blit using Material-based rendering - works with ALL texture formats and readability states.
         /// This is the DEFINITIVE solution for non-readable textures.
+        /// Uses GPU-only operations - no CPU readback required!
         /// </summary>
         private static void BlitWithMaterial(Texture2D source, Texture2D target, int x, int y)
         {
@@ -227,7 +226,7 @@ Shader ""Hidden/RuntimeAtlasPacker/Blit""
                 );
                 rt.filterMode = FilterMode.Point;
                 
-                // Preserve existing atlas content
+                // Preserve existing atlas content by blitting target to RT
                 Graphics.Blit(target, rt);
                 
                 // Activate RT for rendering
@@ -269,11 +268,9 @@ Shader ""Hidden/RuntimeAtlasPacker/Blit""
                 
                 RenderTexture.active = null;
                 
-                // Copy result back to target texture
-                RenderTexture.active = rt;
-                target.ReadPixels(new Rect(0, 0, rt.width, rt.height), 0, 0, false);
-                target.Apply(false, false);
-                RenderTexture.active = null;
+                // ✅ CRITICAL FIX: Use Graphics.CopyTexture instead of ReadPixels
+                // This works on GPU without requiring readable textures!
+                Graphics.CopyTexture(rt, target);
             }
             catch (System.Exception ex)
             {
