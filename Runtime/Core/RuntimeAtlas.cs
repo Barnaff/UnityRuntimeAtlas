@@ -856,7 +856,28 @@ namespace RuntimeAtlasPacker
                     {
                         if (pageIndex >= 0 && pageIndex < _textures.Count)
                         {
-                            _textures[pageIndex].Apply(false, makeNoLongerReadable);
+                            var pageTexture = _textures[pageIndex];
+                            
+                            // ✅ FIX: Skip Apply if texture is already non-readable
+                            // Calling Apply(false, true) on an already non-readable texture fails
+                            if (makeNoLongerReadable && !pageTexture.isReadable)
+                            {
+#if UNITY_EDITOR
+                                Debug.Log($"[RuntimeAtlas] AddBatch: Page {pageIndex} already non-readable, skipping Apply");
+#endif
+                                continue;
+                            }
+                            
+                            // ✅ CRITICAL FIX: For readable textures, TextureBlitter already called Apply()
+                            // Only call Apply() if we want to make the texture non-readable
+                            if (makeNoLongerReadable && pageTexture.isReadable)
+                            {
+#if UNITY_EDITOR
+                                Debug.Log($"[RuntimeAtlas] AddBatch: Making page {pageIndex} non-readable to save memory");
+#endif
+                                pageTexture.Apply(false, true); // makeNoLongerReadable=true
+                            }
+                            // If texture should stay readable, TextureBlitter already applied changes
                         }
                     }
                     _isDirty = false;
@@ -1047,7 +1068,19 @@ namespace RuntimeAtlasPacker
                     {
                         if (pageIndex >= 0 && pageIndex < _textures.Count)
                         {
-                            _textures[pageIndex].Apply(false, makeNoLongerReadable);
+                            var pageTexture = _textures[pageIndex];
+                            
+                            // ✅ FIX: Skip Apply if texture is already non-readable
+                            // Calling Apply(false, true) on an already non-readable texture fails
+                            if (makeNoLongerReadable && !pageTexture.isReadable)
+                            {
+#if UNITY_EDITOR
+                                Debug.Log($"[RuntimeAtlas] AddBatch: Page {pageIndex} already non-readable, skipping Apply");
+#endif
+                                continue;
+                            }
+                            
+                            pageTexture.Apply(false, makeNoLongerReadable);
                         }
                     }
                     _isDirty = false;

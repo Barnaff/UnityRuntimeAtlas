@@ -2,6 +2,7 @@ using System;
 using System.Collections;
 using System.Collections.Generic;
 using System.IO;
+using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
 using UnityEngine;
@@ -29,9 +30,13 @@ namespace RuntimeAtlasPacker.Samples
         [SerializeField] private int _padding = 2;
         
         [Header("Random Images")]
-        [SerializeField] private int _initialImageCount = 8;
-        [SerializeField] private int _additionalImageCount = 4;
-        [SerializeField] private int _imageSize = 128;
+        [Tooltip("Increased to force multiple atlas pages (24 large images = 2-3 pages)")]
+        [SerializeField] private int _initialImageCount = 24;
+        [Tooltip("Additional images to demonstrate adding to multi-page atlas")]
+        [SerializeField] private int _additionalImageCount = 12;
+        [Tooltip("Base size for downloaded images (larger = fewer images per page)")]
+        [SerializeField] private int _imageSize = 300;
+        [Tooltip("Random size variation (+/-)")]
         [SerializeField] private int _imageSizeVariation = 50;
         
         [Header("UI Settings")]
@@ -214,7 +219,7 @@ namespace RuntimeAtlasPacker.Samples
             yield return new WaitForSeconds(_stepDelay);
 
             // Step 2: Download and add initial images using AtlasWebLoader
-            UpdateStatus($"Step 2: Downloading and adding {_initialImageCount} images...");
+            UpdateStatus($"Step 2: Downloading and adding {_initialImageCount} images (will create multiple pages)...");
             var downloadTask = DownloadAndAddImagesAsync(_initialImageCount);
             yield return new WaitUntil(() => downloadTask.IsCompleted);
             
@@ -230,15 +235,22 @@ namespace RuntimeAtlasPacker.Samples
                 yield break;
             }
             
+            UpdateStatus($"✓ Downloaded {_atlas.EntryCount} images across {_atlas.PageCount} page(s)");
+            LogDebug($"Atlas pages after download: {_atlas.PageCount}");
+            for (int i = 0; i < _atlas.PageCount; i++)
+            {
+                var page = _atlas.GetTexture(i);
+                LogDebug($"  Page {i}: {page?.name}, {page?.width}x{page?.height}");
+            }
             yield return new WaitForSeconds(_stepDelay);
 
             // Step 3: Display initial sprites
-            UpdateStatus($"Step 3: Displaying {_atlas.EntryCount} sprites...");
+            UpdateStatus($"Step 3: Displaying {_atlas.EntryCount} sprites from {_atlas.PageCount} page(s)...");
             DisplayAllSprites();
             yield return new WaitForSeconds(_stepDelay);
 
             // Step 4: Save atlas to disk
-            UpdateStatus("Step 4: Saving atlas to disk...");
+            UpdateStatus($"Step 4: Saving atlas ({_atlas.PageCount} page(s)) to disk...");
             SaveAtlas();
             yield return new WaitForSeconds(_stepDelay);
 
@@ -248,17 +260,31 @@ namespace RuntimeAtlasPacker.Samples
             yield return new WaitForSeconds(_stepDelay);
 
             // Step 6: Load atlas from disk
-            UpdateStatus("Step 6: Loading atlas from disk...");
+            UpdateStatus("Step 6: Loading multi-page atlas from disk...");
             LoadAtlas();
+            
+            if (_atlas == null)
+            {
+                UpdateStatus("ERROR: Failed to load atlas!");
+                yield break;
+            }
+            
+            UpdateStatus($"✓ Loaded {_atlas.EntryCount} entries from {_atlas.PageCount} page(s)");
+            LogDebug($"Atlas pages after load: {_atlas.PageCount}");
+            for (int i = 0; i < _atlas.PageCount; i++)
+            {
+                var page = _atlas.GetTexture(i);
+                LogDebug($"  Page {i}: {page?.name}, {page?.width}x{page?.height}, Readable: {page?.isReadable}");
+            }
             yield return new WaitForSeconds(_stepDelay);
 
             // Step 7: Display loaded sprites
-            UpdateStatus($"Step 7: Displaying {_atlas.EntryCount} loaded sprites...");
+            UpdateStatus($"Step 7: Displaying {_atlas.EntryCount} loaded sprites from {_atlas.PageCount} page(s)...");
             DisplayAllSprites();
             yield return new WaitForSeconds(_stepDelay);
 
             // Step 8: Download and add additional images
-            UpdateStatus($"Step 8: Downloading {_additionalImageCount} more images...");
+            UpdateStatus($"Step 8: Downloading {_additionalImageCount} more images (may add pages)...");
             var additionalTask = DownloadAndAddImagesAsync(_additionalImageCount);
             yield return new WaitUntil(() => additionalTask.IsCompleted);
             
@@ -267,19 +293,20 @@ namespace RuntimeAtlasPacker.Samples
                 UpdateStatus($"ERROR: {additionalTask.Exception.GetBaseException().Message}");
             }
             
+            UpdateStatus($"✓ Added {_additionalImageCount} images. Now {_atlas.EntryCount} entries across {_atlas.PageCount} page(s)");
             yield return new WaitForSeconds(_stepDelay);
 
             // Step 9: Display all sprites (original + new)
-            UpdateStatus($"Step 9: Displaying all {_atlas.EntryCount} sprites...");
+            UpdateStatus($"Step 9: Displaying all {_atlas.EntryCount} sprites from {_atlas.PageCount} page(s)...");
             DisplayAllSprites();
             yield return new WaitForSeconds(_stepDelay);
 
             // Step 10: Save updated atlas
-            UpdateStatus("Step 10: Saving updated atlas...");
+            UpdateStatus($"Step 10: Saving updated atlas ({_atlas.PageCount} page(s))...");
             SaveAtlas();
             yield return new WaitForSeconds(_stepDelay);
 
-            UpdateStatus($"✓ Complete! {_atlas.EntryCount} entries, {_atlas.PageCount} page(s)");
+            UpdateStatus($"✅ COMPLETE! {_atlas.EntryCount} entries across {_atlas.PageCount} page(s) saved and loaded successfully!");
         }
 
         private async Task DownloadAndAddImagesAsync(int count)
@@ -305,8 +332,17 @@ namespace RuntimeAtlasPacker.Samples
                 var entries = await _atlas.DownloadAndAddBatchAsync(urlsWithNames, maxConcurrentDownloads: 4, _cts.Token);
                 
                 var successCount = entries.Count;
-                LogDebug($"✓ Successfully downloaded and added {successCount}/{count} images");
-                UpdateStatus($"Downloaded and added {successCount}/{count} images");
+            LogDebug($"✓ Successfully downloaded and added {count}/{count} images");
+            LogDebug($"  - Atlas now has {_atlas.EntryCount} entries across {_atlas.PageCount} page(s)");
+            
+            // Log each page's details
+            for (var i = 0; i < _atlas.PageCount; i++)
+            {
+                var pageTexture = _atlas.GetTexture(i);
+                LogDebug($"  - Page {i}: {pageTexture?.name}, {pageTexture?.width}x{pageTexture?.height}, Readable: {pageTexture?.isReadable}");
+            }
+            
+            UpdateStatus($"Downloaded and added {count}/{count} images across {_atlas.PageCount} page(s)");
             }
             catch (Exception ex)
             {
@@ -353,6 +389,24 @@ namespace RuntimeAtlasPacker.Samples
                 Debug.Log($"[AtlasSaveLoadExample] ✓ Atlas saved successfully to: {_fullSavePath}");
                 Debug.Log($"[AtlasSaveLoadExample]   - {_atlas.EntryCount} entries");
                 Debug.Log($"[AtlasSaveLoadExample]   - {_atlas.PageCount} page(s)");
+                
+                // Log each page's details
+                for (var i = 0; i < _atlas.PageCount; i++)
+                {
+                    var pageTexture = _atlas.GetTexture(i);
+                    Debug.Log($"[AtlasSaveLoadExample]   - Page {i}: {pageTexture?.name}, {pageTexture?.width}x{pageTexture?.height}");
+                }
+                
+                // Log each page file
+                for (int i = 0; i < _atlas.PageCount; i++)
+                {
+                    var pageFile = $"{_fullSavePath}_page{i}.png";
+                    if (File.Exists(pageFile))
+                    {
+                        var fileInfo = new FileInfo(pageFile);
+                        Debug.Log($"[AtlasSaveLoadExample]   - Page {i}: {fileInfo.Length / 1024}KB");
+                    }
+                }
             }
             else
             {
@@ -369,6 +423,20 @@ namespace RuntimeAtlasPacker.Samples
                 Debug.Log($"[AtlasSaveLoadExample] ✓ Atlas loaded successfully from: {_fullSavePath}");
                 Debug.Log($"[AtlasSaveLoadExample]   - {_atlas.EntryCount} entries");
                 Debug.Log($"[AtlasSaveLoadExample]   - {_atlas.PageCount} page(s)");
+                
+                // Log each loaded page's details
+                for (int i = 0; i < _atlas.PageCount; i++)
+                {
+                    var page = _atlas.GetTexture(i);
+                    if (page != null)
+                    {
+                        Debug.Log($"[AtlasSaveLoadExample]   - Page {i}: {page.name}, {page.width}x{page.height}, Readable: {page.isReadable}, Format: {page.format}");
+                    }
+                    else
+                    {
+                        Debug.LogError($"[AtlasSaveLoadExample]   - Page {i}: NULL!");
+                    }
+                }
             }
             else
             {
@@ -386,37 +454,96 @@ namespace RuntimeAtlasPacker.Samples
                 return;
             }
 
-            var entries = _atlas.GetAllEntries();
-            var index = 0;
+            var entries = _atlas.GetAllEntries().ToList();
+            var totalDisplayed = 0;
 
+            LogDebug($"DisplayAllSprites: Processing {entries.Count} entries from {_atlas.PageCount} page(s)...");
+
+            // Group entries by texture index (page number)
+            var entriesByPage = new Dictionary<int, List<AtlasEntry>>();
             foreach (var entry in entries)
             {
-                if (!entry.IsValid)
-                {
-                    continue;
-                }
-
-                var sprite = entry.CreateSprite(100f);
-                if (sprite == null)
-                {
-                    continue;
-                }
-
-                // Create UI Image
-                var imageGO = new GameObject($"Image_{entry.Name}");
-                imageGO.transform.SetParent(_imageContainer, false);
+                if (!entry.IsValid) continue;
                 
-                var image = imageGO.AddComponent<Image>();
-                image.sprite = sprite;
-                image.preserveAspect = true;
-
-                var rectTransform = imageGO.GetComponent<RectTransform>();
-                rectTransform.sizeDelta = new Vector2(_imageSize_UI, _imageSize_UI);
-
-                index++;
+                if (!entriesByPage.ContainsKey(entry.TextureIndex))
+                {
+                    entriesByPage[entry.TextureIndex] = new List<AtlasEntry>();
+                }
+                entriesByPage[entry.TextureIndex].Add(entry);
             }
 
-            LogDebug($"Displayed {index} sprites");
+            // Display sprites page by page with separators
+            foreach (var pageIndex in entriesByPage.Keys.OrderBy(k => k))
+            {
+                var pageEntries = entriesByPage[pageIndex];
+                
+                // Add page separator/header
+                if (_atlas.PageCount > 1)
+                {
+                    CreatePageSeparator(pageIndex, pageEntries.Count);
+                }
+
+                // Display sprites from this page
+                foreach (var entry in pageEntries)
+                {
+                    LogDebug($"  Creating sprite for entry '{entry.Name}': Page={entry.TextureIndex}, Texture={entry.Texture?.name}, Size={entry.Width}x{entry.Height}, UV={entry.UV}");
+
+                    var sprite = entry.CreateSprite(100f);
+                    if (sprite == null)
+                    {
+                        LogDebug($"  ✗ CreateSprite returned NULL for '{entry.Name}'!");
+                        continue;
+                    }
+                    
+                    LogDebug($"  ✓ Sprite created: {sprite.name}, Texture={sprite.texture?.name}, Rect={sprite.rect}");
+
+                    // Create UI Image
+                    var imageGO = new GameObject($"Image_{entry.Name}");
+                    imageGO.transform.SetParent(_imageContainer, false);
+                    
+                    var image = imageGO.AddComponent<Image>();
+                    image.sprite = sprite;
+                    image.preserveAspect = true;
+
+                    var rectTransform = imageGO.GetComponent<RectTransform>();
+                    rectTransform.sizeDelta = new Vector2(_imageSize_UI, _imageSize_UI);
+
+                    totalDisplayed++;
+                }
+            }
+
+            LogDebug($"Displayed {totalDisplayed} sprites from {_atlas.PageCount} page(s)");
+        }
+
+        private void CreatePageSeparator(int pageIndex, int entryCount)
+        {
+            // Create separator GameObject
+            var separatorGO = new GameObject($"PageSeparator_{pageIndex}");
+            separatorGO.transform.SetParent(_imageContainer, false);
+            
+            // Add background panel
+            var image = separatorGO.AddComponent<Image>();
+            image.color = new Color(0.3f, 0.3f, 0.4f, 0.5f);
+            
+            var rectTransform = separatorGO.GetComponent<RectTransform>();
+            rectTransform.sizeDelta = new Vector2(_imageSize_UI * _imagesPerRow + _imageSpacing * (_imagesPerRow - 1), 40f);
+            
+            // Add text
+            var textGO = new GameObject("Text");
+            textGO.transform.SetParent(separatorGO.transform, false);
+            
+            var text = textGO.AddComponent<Text>();
+            text.text = $"═══ Page {pageIndex} ({entryCount} sprites) ═══";
+            text.font = Resources.GetBuiltinResource<Font>("LegacyRuntime.ttf");
+            text.fontSize = 18;
+            text.fontStyle = FontStyle.Bold;
+            text.alignment = TextAnchor.MiddleCenter;
+            text.color = Color.white;
+            
+            var textRect = textGO.GetComponent<RectTransform>();
+            textRect.anchorMin = Vector2.zero;
+            textRect.anchorMax = Vector2.one;
+            textRect.sizeDelta = Vector2.zero;
         }
 
         private void ClearDisplay()

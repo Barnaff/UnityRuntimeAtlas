@@ -544,6 +544,21 @@ namespace RuntimeAtlasPacker
         {
             // Create atlas with loaded settings
             var settings = data.Settings.ToSettings();
+            
+            // ✅ CRITICAL FIX: Force loaded atlas to be READABLE
+            // When loading from disk, the atlas texture pages need to stay readable
+            // because we're loading pre-rendered pixel data from PNGs
+            // Setting this to false would cause the texture to become non-readable after Apply()
+            var originalReadable = settings.Readable;
+            settings.Readable = true; // Force readable for loaded atlases
+            
+#if UNITY_EDITOR
+            if (!originalReadable)
+            {
+                Debug.Log($"[AtlasPersistence] Loading atlas: Forcing Readable=true (was {originalReadable}) to preserve loaded texture data");
+            }
+#endif
+            
             var atlas = new RuntimeAtlas(settings);
             var loadedTextures = new List<Texture2D>();
 
@@ -570,12 +585,15 @@ namespace RuntimeAtlasPacker
 #endif
 
                     // Create texture from PNG data
-                    // ✅ CRITICAL: Create as readable so it can be made non-readable later
+                    // ✅ CRITICAL FIX: Create as READABLE 
+                    // The 3rd parameter (mipChain) determines if mipmaps are generated
+                    // We do NOT pass a 5th parameter - Unity will create a readable texture by default
                     var texture = new Texture2D(2, 2, settings.Format, settings.GenerateMipMaps);
                     texture.filterMode = settings.FilterMode;
                     texture.wrapMode = TextureWrapMode.Clamp;
                     texture.name = $"RuntimeAtlas_Page{i}_Loaded";
 
+                    // ✅ LoadImage will resize the texture and load pixel data
                     if (!texture.LoadImage(pngData))
                     {
                         Debug.LogError($"[AtlasPersistence] LoadImage FAILED for page {i}");
@@ -591,15 +609,44 @@ namespace RuntimeAtlasPacker
                     {
                         Debug.LogError($"[AtlasPersistence] ⚠️ Texture size still 2x2 after LoadImage - PNG might be corrupt!");
                     }
+                    
+                    // Verify texture is readable before Apply
+                    if (!texture.isReadable)
+                    {
+                        Debug.LogError($"[AtlasPersistence] ⚠️ Texture is non-readable after LoadImage!");
+                    }
 #endif
 
-                    // ✅ Keep texture readable on load
-                    // It will be made non-readable during first Add/AddBatch if settings.Readable = false
-                    texture.Apply(false, false);
+                    // ✅ CRITICAL FIX: Apply changes but KEEP texture readable (makeNoLongerReadable = false)
+                    // This is essential because the atlas needs to be able to read from this texture
+                    texture.Apply(settings.GenerateMipMaps, false);
+                    
+#if UNITY_EDITOR
+                    // Verify texture is still readable after Apply
+                    if (!texture.isReadable)
+                    {
+                        Debug.LogError($"[AtlasPersistence] ⚠️ Texture became non-readable after Apply(false, false)! This should never happen.");
+                    }
+#endif
+                    
+#if UNITY_EDITOR
+                    // ✅ DIAGNOSTIC: Check if texture has actual pixel data
+                    try
+                    {
+                        var testPixel = texture.GetPixel(0, 0);
+                        var isBlank = (testPixel.r == 0 && testPixel.g == 0 && testPixel.b == 0 && testPixel.a == 0);
+                        Debug.Log($"[AtlasPersistence] Texture pixel test at (0,0): {testPixel}, IsBlank: {isBlank}");
+                    }
+                    catch (System.Exception ex)
+                    {
+                        Debug.LogError($"[AtlasPersistence] Failed to read texture pixel: {ex.Message}");
+                    }
+#endif
+                    
                     loadedTextures.Add(texture);
 
 #if UNITY_EDITOR
-                    Debug.Log($"[AtlasPersistence] ✓ Loaded page {i}: {texture.name}, Size: {texture.width}x{texture.height}, Readable: {texture.isReadable}");
+                    Debug.Log($"[AtlasPersistence] ✓ Loaded page {i}: {texture.name}, Size: {texture.width}x{texture.height}, Readable: {texture.isReadable}, Format: {texture.format}");
 #endif
 
                     // Add loaded page to atlas using reflection (only once per page)
@@ -793,8 +840,15 @@ namespace RuntimeAtlasPacker
                 var textures = texturesField.GetValue(atlas) as List<Texture2D>;
                 if (textures != null)
                 {
-                    // MEMORY LEAK FIX: Remove the default empty texture if this is the first loaded page
-                    if (textures.Count == 1 && textures[0] != null && textures[0].width == atlas.Settings.InitialSize && atlas.EntryCount == 0)
+                    // ✅ CRITICAL FIX: Remove the default empty texture ONLY if it's the very first page being loaded
+                    // We check textures.Count == 1 AND EntryCount == 0 AND the texture size matches the initial size
+                    // This ensures we only remove the default page created by the RuntimeAtlas constructor
+                    // NOT pages that were just loaded in previous iterations of the loop
+                    if (textures.Count == 1 && textures[0] != null && 
+                        textures[0].width == atlas.Settings.InitialSize && 
+                        textures[0].height == atlas.Settings.InitialSize && 
+                        atlas.EntryCount == 0 &&
+                        !textures[0].name.Contains("_Loaded")) // ✅ Make sure it's not a loaded page
                     {
                         var oldTexture = textures[0];
                         textures.Clear();
@@ -824,15 +878,25 @@ namespace RuntimeAtlasPacker
                 var packers = packersField.GetValue(atlas) as List<IPackingAlgorithm>;
                 if (packers != null)
                 {
-                    // MEMORY LEAK FIX: Remove the default packer if this is the first loaded page
+                    // ✅ CRITICAL FIX: Only remove the default packer if packers list matches textures list state
+                    // This ensures we only clear once, when loading the very first page
                     if (packers.Count == 1 && atlas.EntryCount == 0)
                     {
-                        packers[0]?.Dispose();
-                        packers.Clear();
+                        // Get the textures list to verify we haven't started adding loaded pages yet
+                        var texturesField2 = atlasType.GetField("_textures", bindingFlags);
+                        var textures2 = texturesField2?.GetValue(atlas) as List<Texture2D>;
                         
+                        // Only clear if we have exactly 1 texture and it's NOT a loaded page
+                        // (It would be 1 if we just added the first loaded page, or 0 if we just removed the default)
+                        if (textures2 != null && textures2.Count <= 1)
+                        {
+                            packers[0]?.Dispose();
+                            packers.Clear();
+                            
 #if UNITY_EDITOR
-                        Debug.Log("[AtlasPersistence] Removed default empty packer before loading");
+                            Debug.Log("[AtlasPersistence] Removed default empty packer before loading");
 #endif
+                        }
                     }
                     
                     // Create new packer and initialize with loaded state

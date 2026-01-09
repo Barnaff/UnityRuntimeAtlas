@@ -289,7 +289,10 @@ Shader ""Hidden/RuntimeAtlasPacker/Blit""
                     RenderTexture.active = rt;
                     target.ReadPixels(new Rect(0, 0, rt.width, rt.height), 0, 0, false);
                     RenderTexture.active = null;
-                    // Note: Apply() will be called by the caller (RuntimeAtlas)
+                    
+                    // ✅ CRITICAL: Apply immediately to upload pixel data to GPU
+                    // Without this, the texture changes won't be visible!
+                    target.Apply(false, false); // updateMipmaps=false, makeNoLongerReadable=false
                 }
                 else
                 {
