@@ -458,11 +458,11 @@ MonoBehaviour:
   _autoRunExample: 1
   _showDebugLogs: 1
   _stepDelay: 2
-  _atlasSize: 1024
+  _atlasSize: 512
   _maxPages: 4
   _padding: 2
-  _initialImageCount: 8
-  _additionalImageCount: 4
+  _initialImageCount: 30
+  _additionalImageCount: 10
   _imageSize: 128
   _imageSizeVariation: 50
   _imageSize_UI: 150

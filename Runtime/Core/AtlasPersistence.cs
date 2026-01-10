@@ -169,22 +169,24 @@ namespace RuntimeAtlasPacker
                     {
                         try
                         {
-                            // Convert Color32 array to byte array in RGBA order for PNG encoding
-                            // This ensures correct color representation in the saved PNG
+                            // ✅ CRITICAL FIX: Convert Color32 to byte array preserving EXACT color values
+                            // Color32 stores: r, g, b, a as bytes (0-255)
+                            // PNG RGBA format expects: R, G, B, A in that exact order
                             var byteArray = new byte[pixelData.Length * 4];
                             for (int p = 0; p < pixelData.Length; p++)
                             {
-                                byteArray[p * 4 + 0] = pixelData[p].r;
-                                byteArray[p * 4 + 1] = pixelData[p].g;
-                                byteArray[p * 4 + 2] = pixelData[p].b;
-                                byteArray[p * 4 + 3] = pixelData[p].a;
+                                var pixel = pixelData[p];
+                                byteArray[p * 4 + 0] = pixel.r;  // Red
+                                byteArray[p * 4 + 1] = pixel.g;  // Green
+                                byteArray[p * 4 + 2] = pixel.b;  // Blue
+                                byteArray[p * 4 + 3] = pixel.a;  // Alpha
                             }
 
-                            // Use EncodeArrayToPNG to encode at original resolution with NO quality loss
-                            // GraphicsFormat.R8G8B8A8_UNorm = 8-bit per channel RGBA (standard PNG format)
+                            // Use EncodeArrayToPNG with R8G8B8A8_SRGB for correct color space
+                            // This preserves the original sRGB color values without gamma conversion
                             var png = ImageConversion.EncodeArrayToPNG(
                                 byteArray, 
-                                GraphicsFormat.R8G8B8A8_UNorm, 
+                                GraphicsFormat.R8G8B8A8_SRGB,  // ✅ Use SRGB to match Unity's default texture format
                                 (uint)textureWidth, 
                                 (uint)textureHeight
                             );
@@ -621,12 +623,6 @@ namespace RuntimeAtlasPacker
                     
 #if UNITY_EDITOR
                     Debug.Log($"[AtlasPersistence] LoadImage SUCCESS for page {i}: Size = {texture.width}x{texture.height}, Format = {texture.format}");
-                    
-                    // Verify texture has data
-                    if (texture.width == 2 && texture.height == 2)
-                    {
-                        Debug.LogError($"[AtlasPersistence] ⚠️ Texture size still 2x2 after LoadImage - PNG might be corrupt!");
-                    }
                     
                     // Verify texture is readable before Apply
                     if (!texture.isReadable)
