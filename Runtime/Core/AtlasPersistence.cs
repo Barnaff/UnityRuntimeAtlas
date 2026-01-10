@@ -158,17 +158,25 @@ namespace RuntimeAtlasPacker
                     }
 #endif
 
-                    // Store texture dimensions for background thread
+                    // ✅ CRITICAL: Capture ALL Unity API data on MAIN THREAD before Task.Run
+                    // Unity API calls (texture.format, texture.width, etc.) can ONLY be called from main thread
                     var textureWidth = texture.width;
                     var textureHeight = texture.height;
                     var pageIndex = i;
+                    var textureFormat = texture.format; // ✅ Capture format on main thread
+                    var isLinearColorSpace = QualitySettings.activeColorSpace == ColorSpace.Linear; // ✅ Capture color space on main thread
+                    
+                    // Get the correct GraphicsFormat on main thread
+                    var sourceFormat = GraphicsFormatUtility.GetGraphicsFormat(textureFormat, isLinearColorSpace);
+                    
+                    Debug.Log($"[AtlasPersistence] Page {pageIndex} source format: {textureFormat} -> GraphicsFormat: {sourceFormat}");
 
                     // Encode to PNG on a background thread
-                    // ✅ CRITICAL: Use proper byte array conversion that preserves color channel order
                     byte[] pngData = await Task.Run(() =>
                     {
                         try
                         {
+                            
                             // ✅ CRITICAL FIX: Convert Color32 to byte array preserving EXACT color values
                             // Color32 stores: r, g, b, a as bytes (0-255)
                             // PNG RGBA format expects: R, G, B, A in that exact order
@@ -182,16 +190,17 @@ namespace RuntimeAtlasPacker
                                 byteArray[p * 4 + 3] = pixel.a;  // Alpha
                             }
 
-                            // Use EncodeArrayToPNG with R8G8B8A8_SRGB for correct color space
-                            // This preserves the original sRGB color values without gamma conversion
+                            // ✅ CRITICAL: Use the source texture's GraphicsFormat to preserve color space
+                            // If source is sRGB, encode as sRGB. If source is Linear, encode as Linear.
+                            // This prevents unwanted gamma conversion that causes color shifts
                             var png = ImageConversion.EncodeArrayToPNG(
                                 byteArray, 
-                                GraphicsFormat.R8G8B8A8_SRGB,  // ✅ Use SRGB to match Unity's default texture format
+                                sourceFormat,  // ✅ Match source format exactly
                                 (uint)textureWidth, 
                                 (uint)textureHeight
                             );
 
-                            Debug.Log($"[AtlasPersistence] Page {pageIndex} encoded to PNG: {png?.Length ?? 0} bytes");
+                            Debug.Log($"[AtlasPersistence] Page {pageIndex} encoded to PNG: {png?.Length ?? 0} bytes using format {sourceFormat}");
                             return png;
                         }
                         catch (Exception ex)
