@@ -127,16 +127,11 @@ namespace RuntimeAtlasPacker
                         continue;
                     }
 
-                    // ✅ CRITICAL: Copy NativeArray data to managed array BEFORE going to background thread
+                    // ✅ CRITICAL: Copy Color32 array to managed array BEFORE going to background thread
                     // The NativeArray from AsyncGPUReadback is tied to the request and will be disposed
-                    var pixelBytes = new byte[rawData.Length * 4];
-                    for (int p = 0; p < rawData.Length; p++)
-                    {
-                        pixelBytes[p * 4 + 0] = rawData[p].r;
-                        pixelBytes[p * 4 + 1] = rawData[p].g;
-                        pixelBytes[p * 4 + 2] = rawData[p].b;
-                        pixelBytes[p * 4 + 3] = rawData[p].a;
-                    }
+                    // Color32 is a struct with r, g, b, a fields in the correct order
+                    var pixelData = new Color32[rawData.Length];
+                    rawData.CopyTo(pixelData);
 
 #if UNITY_EDITOR
                     // Verify data is not blank
@@ -169,15 +164,26 @@ namespace RuntimeAtlasPacker
                     var pageIndex = i;
 
                     // Encode to PNG on a background thread
-                    // ✅ CRITICAL: Use ImageConversion.EncodeArrayToPNG which preserves EXACT original quality
+                    // ✅ CRITICAL: Use proper byte array conversion that preserves color channel order
                     byte[] pngData = await Task.Run(() =>
                     {
                         try
                         {
+                            // Convert Color32 array to byte array in RGBA order for PNG encoding
+                            // This ensures correct color representation in the saved PNG
+                            var byteArray = new byte[pixelData.Length * 4];
+                            for (int p = 0; p < pixelData.Length; p++)
+                            {
+                                byteArray[p * 4 + 0] = pixelData[p].r;
+                                byteArray[p * 4 + 1] = pixelData[p].g;
+                                byteArray[p * 4 + 2] = pixelData[p].b;
+                                byteArray[p * 4 + 3] = pixelData[p].a;
+                            }
+
                             // Use EncodeArrayToPNG to encode at original resolution with NO quality loss
                             // GraphicsFormat.R8G8B8A8_UNorm = 8-bit per channel RGBA (standard PNG format)
                             var png = ImageConversion.EncodeArrayToPNG(
-                                pixelBytes, 
+                                byteArray, 
                                 GraphicsFormat.R8G8B8A8_UNorm, 
                                 (uint)textureWidth, 
                                 (uint)textureHeight
