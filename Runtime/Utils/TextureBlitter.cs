@@ -168,7 +168,8 @@ Shader ""Hidden/RuntimeAtlasPacker/Blit""
                     RenderTexture.active = rt;
                     target.ReadPixels(new Rect(0, 0, rt.width, rt.height), 0, 0, false);
                     RenderTexture.active = null;
-                    // Note: Apply() will be called by the caller (RuntimeAtlas)
+                    // Apply immediately to upload to GPU
+                    target.Apply(false, false);
                 }
                 else
                 {
@@ -190,6 +191,16 @@ Shader ""Hidden/RuntimeAtlasPacker/Blit""
                 {
                     RenderTexture.ReleaseTemporary(rt);
                 }
+                
+                // ✅ CRITICAL iOS MEMORY FIX: Force cleanup after batch operation
+                // iOS has strict memory limits and temporary RenderTextures may not be freed immediately
+#if UNITY_IOS
+                // Release any cached RenderTextures
+                RenderTexture.ReleaseAllTemporaryRenderTextures();
+                
+                // Force Unity to clean up released resources
+                Resources.UnloadUnusedAssets();
+#endif
             }
         }
 
@@ -317,6 +328,12 @@ Shader ""Hidden/RuntimeAtlasPacker/Blit""
                 {
                     RenderTexture.ReleaseTemporary(rt);
                 }
+                
+                // ✅ iOS MEMORY FIX: On iOS, explicitly release temporary RenderTextures
+                // to prevent memory buildup during many individual texture additions
+#if UNITY_IOS
+                RenderTexture.ReleaseAllTemporaryRenderTextures();
+#endif
             }
         }
         

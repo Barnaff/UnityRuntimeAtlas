@@ -168,10 +168,38 @@ namespace RuntimeAtlasPacker
             texture.wrapMode = TextureWrapMode.Clamp;
             texture.name = $"RuntimeAtlas_Page{pageIndex}";
             
-            // Clear to transparent
-            var clearPixels = new Color32[_settings.InitialSize * _settings.InitialSize];
-            texture.SetPixels32(clearPixels);
-            texture.Apply(false, false);
+            // ✅ MEMORY OPTIMIZATION: Use RenderTexture to clear instead of allocating large Color32 array
+            // This avoids a large CPU memory allocation (e.g., 4096x4096x4 = 64MB)
+            RenderTexture rt = null;
+            try
+            {
+                rt = RenderTexture.GetTemporary(_settings.InitialSize, _settings.InitialSize, 0, RenderTextureFormat.ARGB32);
+                var prev = RenderTexture.active;
+                RenderTexture.active = rt;
+                GL.Clear(true, true, Color.clear);
+                RenderTexture.active = prev;
+                
+                if (texture.isReadable)
+                {
+                    // For readable textures, use ReadPixels
+                    RenderTexture.active = rt;
+                    texture.ReadPixels(new Rect(0, 0, _settings.InitialSize, _settings.InitialSize), 0, 0, false);
+                    RenderTexture.active = prev;
+                    texture.Apply(false, false);
+                }
+                else
+                {
+                    // For non-readable textures, use Graphics.CopyTexture
+                    Graphics.CopyTexture(rt, texture);
+                }
+            }
+            finally
+            {
+                if (rt != null)
+                {
+                    RenderTexture.ReleaseTemporary(rt);
+                }
+            }
             
             _textures.Add(texture);
             _currentPageIndex = pageIndex;
@@ -800,34 +828,61 @@ namespace RuntimeAtlasPacker
             // Sort descending by area for better packing
             sortedList.Sort((a, b) => b.area.CompareTo(a.area));
 
-            // ✅ OPTIMIZATION: Track which pages are modified to only apply those
-            var modifiedPages = new HashSet<int>();
+            // ✅ MEMORY OPTIMIZATION: Track which pages are modified and collect blit operations
+            var modifiedPages = new Dictionary<int, List<(Texture2D source, int x, int y)>>();
 
-            // Pack all textures WITHOUT applying after each one
+            // Pack all textures WITHOUT blitting yet - just track positions
             var successCount = 0;
             var failCount = 0;
+            var pendingBlits = new List<(string key, Texture2D tex, int pageIndex, RectInt contentRect, int id, Rect uvRect)>();
             
             for (var i = 0; i < sortedList.Count; i++)
             {
                 var (key, tex, _) = sortedList[i];
                 
-                var (result, entry) = AddInternal(tex, spriteVersion);
-                if (result == AddResult.Success && entry != null)
+                // Try to pack without blitting
+                var (result, pageIndex, packedRect) = TryPackTextureInternal(tex, spriteVersion);
+                
+                if (result == AddResult.Success)
                 {
-                    // Store in name dictionary
-                    _entriesByName[key] = entry;
-                    successfulEntries[key] = entry;
-                    modifiedPages.Add(entry.TextureIndex);
+                    // Calculate rects but don't blit yet
+                    var contentRect = new RectInt(
+                        packedRect.x + _settings.Padding,
+                        packedRect.y + _settings.Padding,
+                        tex.width,
+                        tex.height
+                    );
+                    
+                    var currentTexture = _textures[pageIndex];
+                    var uvRect = new Rect(
+                        (float)contentRect.x / (float)currentTexture.width,
+                        (float)contentRect.y / (float)currentTexture.height,
+                        (float)contentRect.width / (float)currentTexture.width,
+                        (float)contentRect.height / (float)currentTexture.height
+                    );
+                    
+                    var id = GetNextId();
+                    
+                    // Add to pending blits
+                    pendingBlits.Add((key, tex, pageIndex, contentRect, id, uvRect));
+                    
+                    // Track modified page
+                    if (!modifiedPages.ContainsKey(pageIndex))
+                    {
+                        modifiedPages[pageIndex] = new List<(Texture2D, int, int)>();
+                    }
+                    modifiedPages[pageIndex].Add((tex, contentRect.x, contentRect.y));
+                    
                     successCount++;
 #if UNITY_EDITOR
-                    Debug.Log($"[RuntimeAtlas] Batch ['{key}']: Added '{tex.name}' -> Entry ID {entry.Id}");
+                    Debug.Log($"[RuntimeAtlas] Batch ['{key}']: Queued '{tex.name}' for page {pageIndex}");
 #endif
                 }
                 else
                 {
                     failCount++;
 #if UNITY_EDITOR
-                    Debug.LogWarning($"[RuntimeAtlas] Batch ['{key}']: Failed to add '{tex.name}' -> Result: {result}");
+                    Debug.LogWarning($"[RuntimeAtlas] Batch ['{key}']: Failed to pack '{tex.name}' -> Result: {result}");
 #endif
                     
                     // If atlas is full, stop trying to add more
@@ -840,44 +895,75 @@ namespace RuntimeAtlasPacker
                     }
                 }
             }
-
-            // ✅ OPTIMIZATION: Apply only modified pages instead of all pages
+            
+            // ✅ CRITICAL MEMORY FIX: Batch all blits per page to avoid creating RenderTexture for each sprite
             if (successCount > 0)
+            {
+#if UNITY_EDITOR
+                Debug.Log($"[RuntimeAtlas] AddBatch: Performing batched blits for {successCount} textures across {modifiedPages.Count} pages");
+#endif
+                
+                foreach (var kvp in modifiedPages)
+                {
+                    var pageIndex = kvp.Key;
+                    var operations = kvp.Value.ToArray();
+                    
+                    try
+                    {
+                        // Batch blit all textures to this page at once (creates only ONE RenderTexture per page)
+                        TextureBlitter.BatchBlit(_textures[pageIndex], operations);
+#if UNITY_EDITOR
+                        Debug.Log($"[RuntimeAtlas] AddBatch: Batched {operations.Length} blits to page {pageIndex}");
+#endif
+                    }
+                    catch (Exception ex)
+                    {
+#if UNITY_EDITOR
+                        Debug.LogError($"[RuntimeAtlas] AddBatch: Batch blit failed for page {pageIndex}: {ex.Message}");
+#endif
+                        // If batch blit fails, clear pending entries for this page
+                        pendingBlits.RemoveAll(p => p.pageIndex == pageIndex);
+                        continue;
+                    }
+                }
+                
+                // Now create all the atlas entries
+                foreach (var (key, tex, pageIndex, contentRect, id, uvRect) in pendingBlits)
+                {
+                    var entry = new AtlasEntry(this, id, pageIndex, contentRect, uvRect, tex.name, default, default, 100f, spriteVersion);
+                    _entries[id] = entry;
+                    _entriesByName[key] = entry;
+                    successfulEntries[key] = entry;
+                }
+                
+                _version++;
+                _isDirty = true;
+            }
+
+            // ✅ MEMORY FIX: Make textures non-readable after batch blit to save memory
+            if (successCount > 0 && !_settings.Readable)
             {
                 try
                 {
 #if UNITY_EDITOR
-                    Debug.Log($"[RuntimeAtlas] AddBatch: Applying texture changes for {successCount} textures across {modifiedPages.Count} pages (of {_textures.Count} total)");
+                    Debug.Log($"[RuntimeAtlas] AddBatch: Making {modifiedPages.Count} pages non-readable to save memory");
 #endif
-                    // ✅ MEMORY FIX: Use makeNoLongerReadable to free CPU memory immediately on non-readable atlases
-                    bool makeNoLongerReadable = !_settings.Readable;
                     
-                    foreach (var pageIndex in modifiedPages)
+                    foreach (var pageIndex in modifiedPages.Keys)
                     {
                         if (pageIndex >= 0 && pageIndex < _textures.Count)
                         {
                             var pageTexture = _textures[pageIndex];
                             
-                            // ✅ FIX: Skip Apply if texture is already non-readable
-                            // Calling Apply(false, true) on an already non-readable texture fails
-                            if (makeNoLongerReadable && !pageTexture.isReadable)
+                            // Only make non-readable if it's currently readable
+                            if (pageTexture.isReadable)
                             {
+                                // Apply with makeNoLongerReadable=true to free CPU memory
+                                pageTexture.Apply(false, true);
 #if UNITY_EDITOR
-                                Debug.Log($"[RuntimeAtlas] AddBatch: Page {pageIndex} already non-readable, skipping Apply");
+                                Debug.Log($"[RuntimeAtlas] AddBatch: Page {pageIndex} made non-readable");
 #endif
-                                continue;
                             }
-                            
-                            // ✅ CRITICAL FIX: For readable textures, TextureBlitter already called Apply()
-                            // Only call Apply() if we want to make the texture non-readable
-                            if (makeNoLongerReadable && pageTexture.isReadable)
-                            {
-#if UNITY_EDITOR
-                                Debug.Log($"[RuntimeAtlas] AddBatch: Making page {pageIndex} non-readable to save memory");
-#endif
-                                pageTexture.Apply(false, true); // makeNoLongerReadable=true
-                            }
-                            // If texture should stay readable, TextureBlitter already applied changes
                         }
                     }
                     _isDirty = false;
@@ -885,17 +971,13 @@ namespace RuntimeAtlasPacker
                 catch (UnityException ex)
                 {
 #if UNITY_EDITOR
-                    Debug.LogError($"[RuntimeAtlas] Failed to apply batch changes: {ex.Message}");
+                    Debug.LogError($"[RuntimeAtlas] Failed to make pages non-readable: {ex.Message}");
 #endif
                 }
-
-                // ✅ OPTIMIZATION: Skip validation for large batches
-#if UNITY_EDITOR
-                if (successCount <= 100)
-                {
-                    ValidateNoOverlaps();
-                }
-#endif
+            }
+            else if (successCount > 0)
+            {
+                _isDirty = false;
             }
             
 #if UNITY_EDITOR
@@ -1532,6 +1614,76 @@ namespace RuntimeAtlasPacker
             }
 
             return (AddResult.Success, entry);
+        }
+
+        /// <summary>
+        /// Try to pack a texture and return its position without blitting.
+        /// Used for batch operations to collect all packing info before blitting.
+        /// </summary>
+        private (AddResult result, int pageIndex, RectInt packedRect) TryPackTextureInternal(Texture2D texture, int spriteVersion = 0)
+        {
+            if (texture == null)
+            {
+                return (AddResult.InvalidTexture, -1, default);
+            }
+
+            var width = texture.width + _settings.Padding * 2;
+            var height = texture.height + _settings.Padding * 2;
+
+            // Check if texture is too large to ever fit
+            if (texture.width > _settings.MaxSize || texture.height > _settings.MaxSize)
+            {
+                return (AddResult.TooLarge, -1, default);
+            }
+
+            // Try to pack in current page first
+            var pageIndex = _currentPageIndex;
+            var packed = TryPackInPage(pageIndex, width, height, out var packedRect);
+            
+            if (!packed)
+            {
+                // Try all existing pages before creating a new one
+                for (var i = 0; i < _textures.Count; i++)
+                {
+                    if (i == pageIndex)
+                    {
+                        continue; // Already tried current page
+                    }
+                    
+                    if (TryPackInPage(i, width, height, out packedRect))
+                    {
+                        packed = true;
+                        pageIndex = i;
+                        break;
+                    }
+                }
+                
+                // If still not packed, try creating a new page
+                if (!packed)
+                {
+                    // Check if we can create more pages
+                    var canCreatePage = _settings.MaxPageCount == -1 || _textures.Count < _settings.MaxPageCount;
+                    
+                    if (!canCreatePage)
+                    {
+                        return (AddResult.Full, -1, default);
+                    }
+                    
+                    // Create new page
+                    CreateNewPage();
+                    pageIndex = _currentPageIndex;
+                    
+                    // Try packing in new page
+                    packed = TryPackInPage(pageIndex, width, height, out packedRect);
+                    
+                    if (!packed)
+                    {
+                        return (AddResult.Full, -1, default);
+                    }
+                }
+            }
+
+            return (AddResult.Success, pageIndex, packedRect);
         }
 
         private bool TryPackInPage(int pageIndex, int width, int height, out RectInt packedRect)
