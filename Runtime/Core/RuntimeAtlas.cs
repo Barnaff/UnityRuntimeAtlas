@@ -148,6 +148,10 @@ namespace RuntimeAtlasPacker
         {
             var pageIndex = _textures.Count;
             
+#if UNITY_EDITOR || UNITY_IOS
+            Debug.Log($"[RuntimeAtlas.CreateNewPage] Creating page {pageIndex}. Size: {_settings.InitialSize}x{_settings.InitialSize}, Format: {_settings.Format}, Readable: {_settings.Readable}. Memory before: {System.GC.GetTotalMemory(false) / 1024 / 1024} MB");
+#endif
+            
             // Create packer for this page
             IPackingAlgorithm packer = _settings.Algorithm switch
             {
@@ -162,11 +166,19 @@ namespace RuntimeAtlasPacker
             packer.Initialize(_settings.InitialSize, _settings.InitialSize);
             _packers.Add(packer);
             
+#if UNITY_EDITOR || UNITY_IOS
+            Debug.Log($"[RuntimeAtlas.CreateNewPage] Creating Texture2D object...");
+#endif
+            
             // Create texture
             var texture = new Texture2D(_settings.InitialSize, _settings.InitialSize, _settings.Format, _settings.GenerateMipMaps);
             texture.filterMode = _settings.FilterMode;
             texture.wrapMode = TextureWrapMode.Clamp;
             texture.name = $"RuntimeAtlas_Page{pageIndex}";
+            
+#if UNITY_EDITOR || UNITY_IOS
+            Debug.Log($"[RuntimeAtlas.CreateNewPage] Texture2D created. Clearing with RenderTexture...");
+#endif
             
             // ✅ MEMORY OPTIMIZATION: Use RenderTexture to clear instead of allocating large Color32 array
             // This avoids a large CPU memory allocation (e.g., 4096x4096x4 = 64MB)
@@ -181,6 +193,9 @@ namespace RuntimeAtlasPacker
                 
                 if (texture.isReadable)
                 {
+#if UNITY_EDITOR || UNITY_IOS
+                    Debug.Log($"[RuntimeAtlas.CreateNewPage] Using ReadPixels for readable texture...");
+#endif
                     // For readable textures, use ReadPixels
                     RenderTexture.active = rt;
                     texture.ReadPixels(new Rect(0, 0, _settings.InitialSize, _settings.InitialSize), 0, 0, false);
@@ -189,9 +204,19 @@ namespace RuntimeAtlasPacker
                 }
                 else
                 {
+#if UNITY_EDITOR || UNITY_IOS
+                    Debug.Log($"[RuntimeAtlas.CreateNewPage] Using Graphics.CopyTexture for non-readable texture...");
+#endif
                     // For non-readable textures, use Graphics.CopyTexture
                     Graphics.CopyTexture(rt, texture);
                 }
+            }
+            catch (Exception ex)
+            {
+#if UNITY_EDITOR || UNITY_IOS
+                Debug.LogError($"[RuntimeAtlas.CreateNewPage] ✗ CRASH during texture clearing: {ex.Message}\nStack: {ex.StackTrace}");
+#endif
+                throw;
             }
             finally
             {
@@ -204,8 +229,8 @@ namespace RuntimeAtlasPacker
             _textures.Add(texture);
             _currentPageIndex = pageIndex;
             
-#if UNITY_EDITOR
-            Debug.Log($"[RuntimeAtlas] Created new page {pageIndex}: {_settings.InitialSize}x{_settings.InitialSize}");
+#if UNITY_EDITOR || UNITY_IOS
+            Debug.Log($"[RuntimeAtlas.CreateNewPage] ✓ Page {pageIndex} created successfully. Total pages: {_textures.Count}, Memory after: {System.GC.GetTotalMemory(false) / 1024 / 1024} MB");
 #endif
         }
 
@@ -943,12 +968,12 @@ namespace RuntimeAtlasPacker
             // ✅ MEMORY FIX: Make textures non-readable after batch blit to save memory
             if (successCount > 0 && !_settings.Readable)
             {
+#if UNITY_EDITOR || UNITY_IOS
+                Debug.Log($"[RuntimeAtlas.AddBatch] Making {modifiedPages.Count} pages non-readable to save memory...");
+#endif
+                
                 try
                 {
-#if UNITY_EDITOR
-                    Debug.Log($"[RuntimeAtlas] AddBatch: Making {modifiedPages.Count} pages non-readable to save memory");
-#endif
-                    
                     foreach (var pageIndex in modifiedPages.Keys)
                     {
                         if (pageIndex >= 0 && pageIndex < _textures.Count)
@@ -958,10 +983,13 @@ namespace RuntimeAtlasPacker
                             // Only make non-readable if it's currently readable
                             if (pageTexture.isReadable)
                             {
+#if UNITY_EDITOR || UNITY_IOS
+                                Debug.Log($"[RuntimeAtlas.AddBatch] → Page {pageIndex}: Making non-readable...");
+#endif
                                 // Apply with makeNoLongerReadable=true to free CPU memory
                                 pageTexture.Apply(false, true);
-#if UNITY_EDITOR
-                                Debug.Log($"[RuntimeAtlas] AddBatch: Page {pageIndex} made non-readable");
+#if UNITY_EDITOR || UNITY_IOS
+                                Debug.Log($"[RuntimeAtlas.AddBatch] ✓ Page {pageIndex}: Now non-readable");
 #endif
                             }
                         }
@@ -970,8 +998,8 @@ namespace RuntimeAtlasPacker
                 }
                 catch (UnityException ex)
                 {
-#if UNITY_EDITOR
-                    Debug.LogError($"[RuntimeAtlas] Failed to make pages non-readable: {ex.Message}");
+#if UNITY_EDITOR || UNITY_IOS
+                    Debug.LogError($"[RuntimeAtlas.AddBatch] ✗ CRASH making pages non-readable: {ex.Message}\nStack: {ex.StackTrace}");
 #endif
                 }
             }
@@ -979,6 +1007,10 @@ namespace RuntimeAtlasPacker
             {
                 _isDirty = false;
             }
+            
+#if UNITY_EDITOR || UNITY_IOS
+            Debug.Log($"[RuntimeAtlas.AddBatch] ✓ COMPLETE. Success: {successCount}, Failed: {failCount}, Final memory: {System.GC.GetTotalMemory(false) / 1024 / 1024} MB");
+#endif
             
 #if UNITY_EDITOR
             Debug.Log($"[RuntimeAtlas] AddBatch: Complete. Added: {successCount}, Failed: {failCount}, Total entries in atlas: {_entries.Count}");

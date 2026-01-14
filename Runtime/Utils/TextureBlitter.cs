@@ -109,6 +109,10 @@ Shader ""Hidden/RuntimeAtlasPacker/Blit""
             if (target == null || operations == null || operations.Length == 0)
                 return;
 
+#if UNITY_EDITOR || UNITY_IOS
+            Debug.Log($"[TextureBlitter.BatchBlit] Starting batch blit: {operations.Length} operations to {target.width}x{target.height} texture. Memory: {System.GC.GetTotalMemory(false) / 1024 / 1024} MB");
+#endif
+
             EnsureMaterial();
             
             RenderTexture rt = null;
@@ -116,6 +120,10 @@ Shader ""Hidden/RuntimeAtlasPacker/Blit""
             
             try
             {
+#if UNITY_EDITOR || UNITY_IOS
+                Debug.Log($"[TextureBlitter.BatchBlit] Allocating RenderTexture {target.width}x{target.height}...");
+#endif
+                
                 // Create RenderTexture matching target size ONCE
                 rt = RenderTexture.GetTemporary(
                     target.width, 
@@ -126,6 +134,11 @@ Shader ""Hidden/RuntimeAtlasPacker/Blit""
                 );
                 rt.filterMode = FilterMode.Point;
                 
+#if UNITY_EDITOR || UNITY_IOS
+                Debug.Log($"[TextureBlitter.BatchBlit] RenderTexture allocated. Memory: {System.GC.GetTotalMemory(false) / 1024 / 1024} MB");
+                Debug.Log($"[TextureBlitter.BatchBlit] Copying existing atlas content...");
+#endif
+                
                 // Preserve existing atlas content
                 Graphics.Blit(target, rt);
                 
@@ -133,6 +146,10 @@ Shader ""Hidden/RuntimeAtlasPacker/Blit""
                 RenderTexture.active = rt;
                 
                 Material blitMat = GetBlitMaterial();
+                
+#if UNITY_EDITOR || UNITY_IOS
+                Debug.Log($"[TextureBlitter.BatchBlit] Drawing {operations.Length} sprites to RenderTexture...");
+#endif
                 
                 // Batch all draw operations
                 GL.PushMatrix();
@@ -161,6 +178,10 @@ Shader ""Hidden/RuntimeAtlasPacker/Blit""
                 GL.PopMatrix();
                 RenderTexture.active = null;
                 
+#if UNITY_EDITOR || UNITY_IOS
+                Debug.Log($"[TextureBlitter.BatchBlit] Sprites drawn. Copying back to target texture (isReadable: {target.isReadable})...");
+#endif
+                
                 // ✅ CRITICAL FIX: Different approach for readable vs non-readable textures
                 if (target.isReadable)
                 {
@@ -176,11 +197,15 @@ Shader ""Hidden/RuntimeAtlasPacker/Blit""
                     // For NON-READABLE textures: Use Graphics.CopyTexture (GPU-only)
                     Graphics.CopyTexture(rt, target);
                 }
+                
+#if UNITY_EDITOR || UNITY_IOS
+                Debug.Log($"[TextureBlitter.BatchBlit] ✓ Batch blit complete. Memory: {System.GC.GetTotalMemory(false) / 1024 / 1024} MB");
+#endif
             }
             catch (System.Exception ex)
             {
-#if UNITY_EDITOR
-                Debug.LogError($"[TextureBlitter.BatchBlit] FAILED: {ex.Message}");
+#if UNITY_EDITOR || UNITY_IOS
+                Debug.LogError($"[TextureBlitter.BatchBlit] ✗ CRASH during batch blit: {ex.Message}\nStack: {ex.StackTrace}");
 #endif
                 throw;
             }
@@ -189,6 +214,9 @@ Shader ""Hidden/RuntimeAtlasPacker/Blit""
                 RenderTexture.active = prevActive;
                 if (rt != null)
                 {
+#if UNITY_EDITOR || UNITY_IOS
+                    Debug.Log($"[TextureBlitter.BatchBlit] Releasing RenderTexture...");
+#endif
                     RenderTexture.ReleaseTemporary(rt);
                     rt = null;
                 }
