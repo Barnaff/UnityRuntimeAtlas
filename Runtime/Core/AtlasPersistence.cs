@@ -279,6 +279,7 @@ namespace RuntimeAtlasPacker
                     // Unity API calls (texture.format, texture.width, etc.) can ONLY be called from main thread
                     var textureWidth = texture.width;
                     var textureHeight = texture.height;
+
                     var pageIndex = i;
                     var textureFormat = texture.format; // ✅ Capture format on main thread
                     var isLinearColorSpace = QualitySettings.activeColorSpace == ColorSpace.Linear; // ✅ Capture color space on main thread
@@ -293,7 +294,6 @@ namespace RuntimeAtlasPacker
                     {
                         try
                         {
-                            
                             // ✅ CRITICAL FIX: Convert Color32 to byte array preserving EXACT color values
                             // Color32 stores: r, g, b, a as bytes (0-255)
                             // PNG RGBA format expects: R, G, B, A in that exact order
@@ -327,6 +327,9 @@ namespace RuntimeAtlasPacker
                         }
                     });
 
+                    // Clear pixel data immediately to free memory
+                    pixelData = null;
+
                     if (pngData == null || pngData.Length == 0)
                     {
                         Debug.LogError($"[AtlasPersistence] PNG encoding failed for page {i} - no data produced");
@@ -334,7 +337,34 @@ namespace RuntimeAtlasPacker
                     }
 
                     Debug.Log($"[AtlasPersistence] ✓ Page {i} successfully encoded: {pngData.Length} bytes at {texture.width}x{texture.height}");
-                    pngDataList.Add((i, pngData, texture.width, texture.height));
+                    
+                    // ✅ MEMORY FIX: Write directly to disk immediately to free memory
+                    // Do NOT add full data to pngDataList
+                    var texturePath = $"{filePath}_page{i}.png";
+                    var lockObj = GetLockForPath(filePath);
+                    
+                    await Task.Run(() => 
+                    {
+                        lock (lockObj)
+                        {
+                            // Ensure directory exists (check once per file or handle globally? Handling here is safe)
+                            var directory = Path.GetDirectoryName(filePath);
+                            if (!string.IsNullOrEmpty(directory) && !Directory.Exists(directory))
+                            {
+                                Directory.CreateDirectory(directory);
+                            }
+                            
+                            File.WriteAllBytes(texturePath, pngData);
+                        }
+                    });
+                    
+                    Debug.Log($"[AtlasPersistence] Wrote page {i} to disk: {texturePath}");
+                    
+                    // Release PNG memory immediately
+                    pngData = null;
+                    
+                    // Add logic placeholder so we know we processed it, but with null data
+                    pngDataList.Add((i, null, textureWidth, textureHeight));
                 }
 
                 if (pngDataList.Count == 0)
@@ -346,12 +376,12 @@ namespace RuntimeAtlasPacker
                 // Serialize JSON on main thread (compact format)
                 var json = JsonUtility.ToJson(data, false);
 
-                // Get file-specific lock and write files on background thread
-                var lockObj = GetLockForPath(filePath);
+                // Write JSON file on background thread
+                var metaLockObj = GetLockForPath(filePath);
                 
                 await Task.Run(() =>
                 {
-                    lock (lockObj)
+                    lock (metaLockObj)
                     {
                         try
                         {
@@ -362,14 +392,8 @@ namespace RuntimeAtlasPacker
                                 Directory.CreateDirectory(directory);
                             }
 
-                            // Write PNG files
-                            foreach (var (index, pngData, width, height) in pngDataList)
-                            {
-                                var texturePath = $"{filePath}_page{index}.png";
-                                File.WriteAllBytes(texturePath, pngData);
-                                Debug.Log($"[AtlasPersistence] Wrote page {index} to disk: {texturePath} ({pngData.Length} bytes, {width}x{height})");
-                            }
-
+                            // We already wrote PNGs in the loop
+                            
                             // Write JSON file
                             var jsonPath = $"{filePath}.json";
                             File.WriteAllText(jsonPath, json);
