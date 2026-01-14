@@ -1285,6 +1285,7 @@ namespace RuntimeAtlasPacker
         /// <returns>Dictionary mapping keys to their atlas entries (null for failed downloads)</returns>
         public async Task<Dictionary<string, AtlasEntry>> DownloadAndAddBatchAsync(
             Dictionary<string, string> urlsWithKeys,
+            Dictionary<string, int> versions = null,
             int maxConcurrentDownloads = 4,
             CancellationToken cancellationToken = default)
         {
@@ -1308,7 +1309,7 @@ namespace RuntimeAtlasPacker
             using (var webLoader = new AtlasWebLoader(this, maxConcurrentDownloads))
             {
                 // Download all images with custom keys
-                var results = await webLoader.DownloadAndAddBatchAsync(urlsWithKeys, cancellationToken);
+                var results = await webLoader.DownloadAndAddBatchAsync(urlsWithKeys, versions, cancellationToken);
                 
                 // Convert sprites to entries
                 var entries = new Dictionary<string, AtlasEntry>();
@@ -1361,7 +1362,7 @@ namespace RuntimeAtlasPacker
                 [url] = key ?? $"Remote_{url.GetHashCode():X8}"
             };
 
-            var results = await DownloadAndAddBatchAsync(urlsWithKeys, maxConcurrentDownloads: 1, cancellationToken);
+            var results = await DownloadAndAddBatchAsync(urlsWithKeys, versions: null, maxConcurrentDownloads: 1, cancellationToken);
             
             return results.Values.FirstOrDefault();
         }

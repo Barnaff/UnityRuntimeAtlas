@@ -167,6 +167,7 @@ namespace RuntimeAtlasPacker
         /// <returns>Dictionary mapping sprite names to their sprites (null for failed downloads)</returns>
         public async Task<Dictionary<string, Sprite>> DownloadAndAddBatchAsync(
             Dictionary<string, string> urlsWithNames, 
+            Dictionary<string, int> versions = null,
             CancellationToken cancellationToken = default)
         {
             if (_isDisposed)

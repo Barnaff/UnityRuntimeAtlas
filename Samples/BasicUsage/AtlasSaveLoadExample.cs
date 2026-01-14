@@ -329,7 +329,7 @@ namespace RuntimeAtlasPacker.Samples
             // Use AtlasWebLoader to download and add all images in batch
             try
             {
-                var entries = await _atlas.DownloadAndAddBatchAsync(urlsWithNames, maxConcurrentDownloads: 4, _cts.Token);
+                var entries = await _atlas.DownloadAndAddBatchAsync(urlsWithNames, versions: null, maxConcurrentDownloads: 4, cancellationToken: _cts.Token);
                 
                 var successCount = entries.Count;
             LogDebug($"✓ Successfully downloaded and added {count}/{count} images");
