@@ -46,12 +46,129 @@ namespace RuntimeAtlasPacker
         [Obsolete("Use SaveAtlasAsync instead for better memory management and performance")]
         public static bool SaveAtlas(RuntimeAtlas atlas, string filePath)
         {
-            Debug.LogWarning("[AtlasPersistence] SaveAtlas is deprecated. Use SaveAtlasAsync for better memory management.");
-            
-            // Redirect to async version and wait for completion
-            var task = SaveAtlasAsync(atlas, filePath);
-            task.Wait();
-            return task.Result;
+            if (atlas == null)
+            {
+                Debug.LogError("[AtlasPersistence] Cannot save null atlas");
+                return false;
+            }
+
+            try
+            {
+#if UNITY_EDITOR
+                var profiler = RuntimeAtlasProfiler.Begin("SaveAtlas", "AtlasPersistence", filePath);
+#endif
+
+                Debug.Log($"[AtlasPersistence] Starting save of {atlas.PageCount} page(s) to: {filePath}");
+
+                // Serialize atlas data (without texture data)
+                var data = SerializeAtlas(atlas);
+
+                // Get file-specific lock
+                var lockObj = GetLockForPath(filePath);
+
+                lock (lockObj)
+                {
+                    try
+                    {
+                        // Ensure directory exists
+                        var directory = Path.GetDirectoryName(filePath);
+                        if (!string.IsNullOrEmpty(directory) && !Directory.Exists(directory))
+                        {
+                            Directory.CreateDirectory(directory);
+                        }
+
+                        // Save each page as PNG
+                        for (var i = 0; i < atlas.PageCount; i++)
+                        {
+                            var texture = atlas.GetTexture(i);
+                            if (texture == null)
+                            {
+                                Debug.LogWarning($"[AtlasPersistence] Skipping null texture at page {i}");
+                                continue;
+                            }
+
+                            Debug.Log($"[AtlasPersistence] Processing page {i}: {texture.width}x{texture.height}, Format: {texture.format}, Readable: {texture.isReadable}");
+
+                            byte[] pngData = null;
+
+                            // Check if texture is readable
+                            if (texture.isReadable)
+                            {
+                                // Direct encoding for readable textures
+                                pngData = texture.EncodeToPNG();
+                                Debug.Log($"[AtlasPersistence] Page {i} encoded directly (readable texture): {pngData?.Length ?? 0} bytes");
+                            }
+                            else
+                            {
+                                // For non-readable textures, we need to use RenderTexture to copy the data
+                                Debug.Log($"[AtlasPersistence] Page {i} is not readable, using RenderTexture method");
+                                
+                                // Create temporary RenderTexture
+                                RenderTexture rt = RenderTexture.GetTemporary(texture.width, texture.height, 0, RenderTextureFormat.ARGB32, RenderTextureReadWrite.Default);
+                                RenderTexture previous = RenderTexture.active;
+                                
+                                try
+                                {
+                                    // Blit the texture to RenderTexture
+                                    Graphics.Blit(texture, rt);
+                                    RenderTexture.active = rt;
+
+                                    // Create a temporary readable texture and read from RenderTexture
+                                    Texture2D tempTexture = new Texture2D(texture.width, texture.height, TextureFormat.ARGB32, false);
+                                    tempTexture.ReadPixels(new Rect(0, 0, rt.width, rt.height), 0, 0);
+                                    tempTexture.Apply();
+
+                                    // Encode to PNG
+                                    pngData = tempTexture.EncodeToPNG();
+                                    Debug.Log($"[AtlasPersistence] Page {i} encoded via RenderTexture: {pngData?.Length ?? 0} bytes");
+
+                                    // Clean up temp texture
+                                    UnityEngine.Object.DestroyImmediate(tempTexture);
+                                }
+                                finally
+                                {
+                                    // Restore previous RenderTexture and release temp RT
+                                    RenderTexture.active = previous;
+                                    RenderTexture.ReleaseTemporary(rt);
+                                }
+                            }
+
+                            if (pngData == null || pngData.Length == 0)
+                            {
+                                Debug.LogError($"[AtlasPersistence] PNG encoding failed for page {i}");
+                                return false;
+                            }
+
+                            // Write PNG file
+                            var texturePath = $"{filePath}_page{i}.png";
+                            File.WriteAllBytes(texturePath, pngData);
+                            Debug.Log($"[AtlasPersistence] Wrote page {i} to disk: {texturePath} ({pngData.Length} bytes, {texture.width}x{texture.height})");
+                        }
+
+                        // Write JSON file
+                        var json = JsonUtility.ToJson(data, false);
+                        var jsonPath = $"{filePath}.json";
+                        File.WriteAllText(jsonPath, json);
+                        Debug.Log($"[AtlasPersistence] Wrote metadata to disk: {jsonPath}");
+                    }
+                    catch (Exception ex)
+                    {
+                        Debug.LogError($"[AtlasPersistence] File write error: {ex.Message}\n{ex.StackTrace}");
+                        throw;
+                    }
+                }
+
+#if UNITY_EDITOR
+                RuntimeAtlasProfiler.End(profiler);
+#endif
+                Debug.Log($"[AtlasPersistence] ✓ Successfully saved atlas to {filePath}.json with {atlas.PageCount} page(s)");
+                return true;
+            }
+            catch (Exception ex)
+            {
+                Debug.LogError($"[AtlasPersistence] Failed to save atlas: {ex.Message}\n{ex.StackTrace}");
+                return false;
+            }
         }
 
         /// <summary>
