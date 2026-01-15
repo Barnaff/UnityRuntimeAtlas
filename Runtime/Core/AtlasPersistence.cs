@@ -307,19 +307,12 @@ namespace RuntimeAtlasPacker
                                 byteArray[p * 4 + 3] = pixel.a;  // Alpha
                             }
 
-                            // ✅ CRITICAL FIX: We manually created R,G,B,A byte array above.
-                            // Therefore we MUST tell EncodeArrayToPNG that the input data is in R8G8B8A8 format.
-                            // If we pass 'sourceFormat' (which might be ARGB32 or BGRA32 from the original texture), 
-                            // Unity will try to convert our RGBA bytes as if they were BGRA/ARGB, leading to wrong colors
-                            // or crashes in SIMD remapping as seen in the stack trace.
-                            
-                            var inputFormat = isLinearColorSpace 
-                                ? UnityEngine.Experimental.Rendering.GraphicsFormat.R8G8B8A8_UNorm 
-                                : UnityEngine.Experimental.Rendering.GraphicsFormat.R8G8B8A8_SRGB;
-
+                            // ✅ CRITICAL: Use the source texture's GraphicsFormat to preserve color space
+                            // If source is sRGB, encode as sRGB. If source is Linear, encode as Linear.
+                            // This prevents unwanted gamma conversion that causes color shifts
                             var png = ImageConversion.EncodeArrayToPNG(
                                 byteArray, 
-                                inputFormat, 
+                                sourceFormat,  // ✅ Match source format exactly
                                 (uint)textureWidth, 
                                 (uint)textureHeight
                             );
