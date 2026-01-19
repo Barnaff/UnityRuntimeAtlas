@@ -122,6 +122,23 @@ namespace RuntimeAtlasPacker
                 Debug.LogWarning($"[RuntimeAtlas] Invalid or unsupported texture format {settings.Format}. Using RGBA32 instead.");
                 settings.Format = TextureFormat.RGBA32;
             }
+
+            // Ensure valid dimensions
+            if (settings.InitialSize <= 0) 
+            {
+                settings.InitialSize = 256;
+#if UNITY_EDITOR
+                Debug.LogWarning("[RuntimeAtlas] InitialSize was invalid (<= 0), setting to 256");
+#endif
+            }
+            
+            if (settings.MaxSize <= 0) 
+            {
+                settings.MaxSize = 2048;
+#if UNITY_EDITOR
+                Debug.LogWarning("[RuntimeAtlas] MaxSize was invalid (<= 0), setting to 2048");
+#endif
+            }
             
             _settings = settings;
             _entries = new Dictionary<int, AtlasEntry>(64);
@@ -182,47 +199,50 @@ namespace RuntimeAtlasPacker
             
             // ✅ MEMORY OPTIMIZATION: Use RenderTexture to clear instead of allocating large Color32 array
             // This avoids a large CPU memory allocation (e.g., 4096x4096x4 = 64MB)
-            RenderTexture rt = null;
-            try
+            if (_settings.InitialSize > 0) // Ensure valid size
             {
-                rt = RenderTexture.GetTemporary(_settings.InitialSize, _settings.InitialSize, 0, RenderTextureFormat.ARGB32);
-                var prev = RenderTexture.active;
-                RenderTexture.active = rt;
-                GL.Clear(true, true, Color.clear);
-                RenderTexture.active = prev;
-                
-                if (texture.isReadable)
+                RenderTexture rt = null;
+                try
                 {
-#if UNITY_EDITOR || UNITY_IOS
-                    Debug.Log($"[RuntimeAtlas.CreateNewPage] Using ReadPixels for readable texture...");
-#endif
-                    // For readable textures, use ReadPixels
+                    rt = RenderTexture.GetTemporary(_settings.InitialSize, _settings.InitialSize, 0, RenderTextureFormat.ARGB32);
+                    var prev = RenderTexture.active;
                     RenderTexture.active = rt;
-                    texture.ReadPixels(new Rect(0, 0, _settings.InitialSize, _settings.InitialSize), 0, 0, false);
+                    GL.Clear(true, true, Color.clear);
                     RenderTexture.active = prev;
-                    texture.Apply(false, false);
+                    
+                    if (texture.isReadable)
+                    {
+#if UNITY_EDITOR || UNITY_IOS
+                        Debug.Log($"[RuntimeAtlas.CreateNewPage] Using ReadPixels for readable texture...");
+#endif
+                        // For readable textures, use ReadPixels
+                        RenderTexture.active = rt;
+                        texture.ReadPixels(new Rect(0, 0, _settings.InitialSize, _settings.InitialSize), 0, 0, false);
+                        RenderTexture.active = prev;
+                        texture.Apply(false, false);
+                    }
+                    else
+                    {
+#if UNITY_EDITOR || UNITY_IOS
+                        Debug.Log($"[RuntimeAtlas.CreateNewPage] Using Graphics.CopyTexture for non-readable texture...");
+#endif
+                        // For non-readable textures, use Graphics.CopyTexture
+                        Graphics.CopyTexture(rt, texture);
+                    }
                 }
-                else
+                catch (Exception ex)
                 {
 #if UNITY_EDITOR || UNITY_IOS
-                    Debug.Log($"[RuntimeAtlas.CreateNewPage] Using Graphics.CopyTexture for non-readable texture...");
+                    Debug.LogError($"[RuntimeAtlas.CreateNewPage] ✗ CRASH during texture clearing: {ex.Message}\nStack: {ex.StackTrace}");
 #endif
-                    // For non-readable textures, use Graphics.CopyTexture
-                    Graphics.CopyTexture(rt, texture);
+                    throw;
                 }
-            }
-            catch (Exception ex)
-            {
-#if UNITY_EDITOR || UNITY_IOS
-                Debug.LogError($"[RuntimeAtlas.CreateNewPage] ✗ CRASH during texture clearing: {ex.Message}\nStack: {ex.StackTrace}");
-#endif
-                throw;
-            }
-            finally
-            {
-                if (rt != null)
+                finally
                 {
-                    RenderTexture.ReleaseTemporary(rt);
+                    if (rt != null)
+                    {
+                        RenderTexture.ReleaseTemporary(rt);
+                    }
                 }
             }
             
@@ -846,6 +866,8 @@ namespace RuntimeAtlasPacker
             {
                 if (kvp.Value != null)
                 {
+                    // Use texture name or index as key
+                    var key = string.IsNullOrEmpty(kvp.Value.name) ? kvp.Value.GetInstanceID().ToString() : kvp.Value.name;
                     sortedList.Add((kvp.Key, kvp.Value, kvp.Value.width * kvp.Value.height));
                 }
             }
@@ -1251,27 +1273,48 @@ namespace RuntimeAtlasPacker
                 return new Dictionary<string, AtlasEntry>();
             }
 
-            // Create temporary web loader
-            using (var webLoader = new AtlasWebLoader(this, maxConcurrentDownloads))
+            // Dictionary to hold the downloaded native textures
+            // We MUST reference these to destroy them later
+            Dictionary<string, Texture2D> downloadedTextures = null;
+
+            try
             {
-                var results = await webLoader.GetSpritesAsync(urlList, cancellationToken);
-                
-                // Convert sprites to entries
-                var entries = new Dictionary<string, AtlasEntry>();
-                foreach (var kvp in results)
+                // Create temporary web loader
+                using (var webLoader = new AtlasWebLoader(this, maxConcurrentDownloads))
                 {
-                    if (kvp.Value != null)
+                    // Assume webLoader returns Dictionary<string, Texture2D>
+                    // The keys match the keys provided in urlsWithKeys
+                    var urlsWithKeys = urls.ToDictionary(u => u, u => u);
+                    downloadedTextures = await webLoader.LoadBatchAsync(urlsWithKeys, cancellationToken);
+                }
+
+                if (downloadedTextures == null || downloadedTextures.Count == 0)
+                {
+                    return new Dictionary<string, AtlasEntry>();
+                }
+
+                // Add to atlas (This copies pixels, it does NOT take ownership of the texture objects)
+                // We use version 0 or maintain existing logic
+                return AddBatch(downloadedTextures); 
+            }
+            finally
+            {
+                // CRITICAL MEMORY FIX: Destroy all downloaded textures
+                // Once AddBatch returns, the pixels are in the atlas. The source textures are garbage.
+                if (downloadedTextures != null)
+                {
+                    foreach (var tex in downloadedTextures.Values)
                     {
-                        // Get entry by sprite name
-                        var entry = GetEntryByName(kvp.Value.name);
-                        if (entry != null)
+                        if (tex != null)
                         {
-                            entries[kvp.Key] = entry;
+                            if (Application.isPlaying)
+                                UnityEngine.Object.Destroy(tex);
+                            else
+                                UnityEngine.Object.DestroyImmediate(tex);
                         }
                     }
+                    downloadedTextures.Clear();
                 }
-                
-                return entries;
             }
         }
 
@@ -2111,81 +2154,117 @@ namespace RuntimeAtlasPacker
             var texture = _textures[pageIndex];
             var packer = _packers[pageIndex];
             
-            // Collect all entries on this page
+            // List to hold temp textures. Declared outside verification for try/finally access
             var pageEntries = new List<(AtlasEntry entry, Texture2D texture)>();
-            foreach (var entry in _entries.Values)
+            
+            try
             {
-                if (entry.TextureIndex == pageIndex)
+                // Collect all entries on this page
+                foreach (var entry in _entries.Values)
                 {
-                    // Copy current texture data
-                    var tex = TextureBlitter.CopyRegion(texture, entry.Rect);
-                    pageEntries.Add((entry, tex));
+                    if (entry.TextureIndex == pageIndex)
+                    {
+                        // Copy current texture data
+                        // This creates a NEW texture which must be cleaned up
+                        var tex = TextureBlitter.CopyRegion(texture, entry.Rect);
+                        if (tex != null)
+                        {
+                            pageEntries.Add((entry, tex));
+                        }
+                    }
                 }
-            }
 
-            if (pageEntries.Count == 0)
-            {
-                return;
-            }
+                if (pageEntries.Count == 0)
+                {
+                    return;
+                }
 
 #if UNITY_EDITOR
-            Debug.Log($"[RuntimeAtlas] Repacking page {pageIndex} with {pageEntries.Count} entries...");
+                Debug.Log($"[RuntimeAtlas] Repacking page {pageIndex} with {pageEntries.Count} entries...");
 #endif
 
-            // Clear page
-            packer.Clear();
-            var clearPixels = new Color32[texture.width * texture.height];
-            texture.SetPixels32(clearPixels);
-            texture.Apply(); // Force clear to ensure no artifacts remain
-
-            // Sort entries by area (descending) for better packing
-            pageEntries.Sort((a, b) => (b.entry.Width * b.entry.Height).CompareTo(a.entry.Width * a.entry.Height));
-
-            // Re-pack
-            foreach (var (entry, tex) in pageEntries)
-            {
-                var width = tex.width + _settings.Padding * 2;
-                var height = tex.height + _settings.Padding * 2;
-
-                if (packer.TryPack(width, height, out var packedRect))
+                // Clear page
+                packer.Clear();
+                
+                // Use optimized clearing based on readability
+                if (_settings.Readable)
                 {
-                    var contentRect = new RectInt(
-                        packedRect.x + _settings.Padding,
-                        packedRect.y + _settings.Padding,
-                        tex.width,
-                        tex.height
-                    );
-
-                    // Blit back to atlas
-                    TextureBlitter.Blit(tex, texture, contentRect.x, contentRect.y);
-
-                    // Update entry - ✅ FIX: Ensure float division for precision
-                    var uvRect = new Rect(
-                        (float)contentRect.x / (float)texture.width,
-                        (float)contentRect.y / (float)texture.height,
-                        (float)contentRect.width / (float)texture.width,
-                        (float)contentRect.height / (float)texture.height
-                    );
-                    
-                    entry.UpdateRect(contentRect, uvRect);
-                    OnEntryUpdated?.Invoke(this, entry);
+                    var clearPixels = new Color32[texture.width * texture.height];
+                    texture.SetPixels32(clearPixels);
+                    texture.Apply(); // Force clear to ensure no artifacts remain
                 }
                 else
                 {
-#if UNITY_EDITOR
-                    Debug.LogError($"[RuntimeAtlas] Failed to repack entry {entry.Id} on page {pageIndex}. This should not happen if the page was big enough before.");
-#endif
+                    // Optimization for non-readable: Use RenderTexture to clear
+                    var rt = RenderTexture.GetTemporary(texture.width, texture.height, 0, RenderTextureFormat.ARGB32);
+                    var prev = RenderTexture.active;
+                    RenderTexture.active = rt;
+                    GL.Clear(true, true, Color.clear);
+                    RenderTexture.active = prev;
+                    Graphics.CopyTexture(rt, texture);
+                    RenderTexture.ReleaseTemporary(rt);
                 }
 
-                // Cleanup temp texture
-                if (Application.isPlaying)
+                // Sort entries by area (descending) for better packing
+                pageEntries.Sort((a, b) => (b.entry.Width * b.entry.Height).CompareTo(a.entry.Width * a.entry.Height));
+
+                // Re-pack
+                foreach (var (entry, tex) in pageEntries)
                 {
-                    UnityEngine.Object.Destroy(tex);
+                    var width = tex.width + _settings.Padding * 2;
+                    var height = tex.height + _settings.Padding * 2;
+
+                    if (packer.TryPack(width, height, out var packedRect))
+                    {
+                        var contentRect = new RectInt(
+                            packedRect.x + _settings.Padding,
+                            packedRect.y + _settings.Padding,
+                            tex.width,
+                            tex.height
+                        );
+
+                        // Blit back to atlas
+                        TextureBlitter.Blit(tex, texture, contentRect.x, contentRect.y);
+
+                        // Update entry - ✅ FIX: Ensure float division for precision
+                        var uvRect = new Rect(
+                            (float)contentRect.x / (float)texture.width,
+                            (float)contentRect.y / (float)texture.height,
+                            (float)contentRect.width / (float)texture.width,
+                            (float)contentRect.height / (float)texture.height
+                        );
+                        
+                        entry.UpdateRect(contentRect, uvRect);
+                        OnEntryUpdated?.Invoke(this, entry);
+                    }
+                    else
+                    {
+#if UNITY_EDITOR
+                        Debug.LogError($"[RuntimeAtlas] Failed to repack entry {entry.Id} on page {pageIndex}. This should not happen if the page was big enough before.");
+#endif
+                    }
                 }
-                else
+                
+                // Apply changes to the atlas page
+                // We preserve the readability setting
+                bool makeNoLongerReadable = !_settings.Readable;
+                texture.Apply(false, makeNoLongerReadable);
+            }
+            finally
+            {
+                // CRITICAL MEMORY FIX: Always destroy temporary textures
+                // Even if packer.TryPack crashes or sorting fails
+                foreach (var item in pageEntries)
                 {
-                    UnityEngine.Object.DestroyImmediate(tex);
+                    if (item.texture != null)
+                    {
+                        if (Application.isPlaying)
+                            UnityEngine.Object.Destroy(item.texture);
+                        else
+                            UnityEngine.Object.DestroyImmediate(item.texture);
+                    }
                 }
+                pageEntries.Clear();
             }
         }
 

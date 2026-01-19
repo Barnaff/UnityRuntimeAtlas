@@ -276,6 +276,45 @@ namespace RuntimeAtlasPacker
             return results;
         }
 
+        /// <summary>
+        /// Download multiple images as a batch but do NOT add them to the atlas.
+        /// Returns a dictionary of downloaded textures that MUST be destroyed by the caller.
+        /// </summary>
+        /// <param name="urlsWithNames">Dictionary of URLs to sprite names</param>
+        /// <param name="cancellationToken">Optional cancellation token</param>
+        /// <returns>Dictionary mapping sprite names to their downloaded textures</returns>
+        public async Task<Dictionary<string, Texture2D>> LoadBatchAsync(
+            Dictionary<string, string> urlsWithNames, 
+            CancellationToken cancellationToken = default)
+        {
+            if (_isDisposed)
+            {
+                throw new ObjectDisposedException(nameof(AtlasWebLoader));
+            }
+
+            // Download all textures
+            var downloadTasks = new List<Task<(string name, Texture2D texture)>>();
+
+            foreach (var kvp in urlsWithNames)
+            {
+                downloadTasks.Add(DownloadTextureAsync(kvp.Key, kvp.Value, cancellationToken));
+            }
+
+            var downloadedResults = await Task.WhenAll(downloadTasks);
+
+            // Build result dictionary
+            var textureDict = new Dictionary<string, Texture2D>();
+            foreach (var (name, texture) in downloadedResults)
+            {
+                if (texture != null)
+                {
+                    textureDict[name] = texture;
+                }
+            }
+
+            return textureDict;
+        }
+
         private async Task<(string url, Sprite sprite)> GetSpriteWithUrlAsync(string url, CancellationToken cancellationToken)
         {
             var sprite = await GetSpriteAsync(url, null, cancellationToken);
@@ -520,4 +559,3 @@ namespace RuntimeAtlasPacker
         }
     }
 }
-

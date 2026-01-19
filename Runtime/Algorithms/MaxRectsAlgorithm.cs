@@ -360,6 +360,7 @@ namespace RuntimeAtlasPacker
             {
                 _freeRects.Dispose();
             }
+            
             if (_usedRects.IsCreated)
             {
                 _usedRects.Dispose();
@@ -367,3 +368,4 @@ namespace RuntimeAtlasPacker
         }
     }
 }
+
