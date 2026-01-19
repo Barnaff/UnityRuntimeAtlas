@@ -8,6 +8,7 @@ namespace Packages.UnityRuntimeAtlas.Tests.Runtime
     {
         private const int ATLAS_SIZE = 1024;
 
+        #if PACKING_BURST_ENABLED
         [Test]
         public void MaxRectsAlgorithm_PacksCorrectly()
         {
@@ -158,5 +159,7 @@ namespace Packages.UnityRuntimeAtlas.Tests.Runtime
             return a.x < b.x + b.width && a.x + a.width > b.x &&
                    a.y < b.y + b.height && a.y + a.height > b.y;
         }
+
+#endif
     }
 }

@@ -175,15 +175,12 @@ namespace RuntimeAtlasPacker
 #if PACKING_BURST_ENABLED
                 PackingAlgorithm.MaxRects => new MaxRectsAlgorithm(),
                 PackingAlgorithm.Skyline => new SkylineAlgorithm(),
-                PackingAlgorithm.Guillotine => new GuillotineAlgorithm(),
-                PackingAlgorithm.Shelf => new ShelfAlgorithm(),
 #else
                 PackingAlgorithm.MaxRects => new MaxRectsAlgorithmNoBurst(),
                 // Fallback for others if they rely on burst/native collections
                 PackingAlgorithm.Skyline => new MaxRectsAlgorithmNoBurst(), 
-                PackingAlgorithm.Guillotine => new GuillotineAlgorithm(), // NoBurst, so fine
-                PackingAlgorithm.Shelf => new ShelfAlgorithm(), // NoBurst, so fine
 #endif
+                
 #if PACKING_BURST_ENABLED
                 _ => new MaxRectsAlgorithm()
 #else
