@@ -2,7 +2,8 @@
     "name": "RuntimeAtlasPacker.Editor",
     "rootNamespace": "RuntimeAtlasPacker.Editor",
     "references": [
-        "RuntimeAtlasPacker"
+        "RuntimeAtlasPacker",
+        "UnityRuntimeAtlas"
     ],
     "includePlatforms": [
         "Editor"

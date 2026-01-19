@@ -1,3 +1,4 @@
+#if PACKING_BURST_ENABLED
 using System;
 using System.Collections.Generic;
 using UnityEngine;
@@ -168,4 +169,4 @@ namespace RuntimeAtlasPacker
         }
     }
 }
-
+#endif

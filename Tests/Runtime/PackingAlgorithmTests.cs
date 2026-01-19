@@ -98,12 +98,31 @@ namespace Packages.UnityRuntimeAtlas.Tests.Runtime
     #endif
 
         [Test]
+        public void MaxRectsAlgorithmNoBurst_PacksCorrectly()
+        {
+            using (IPackingAlgorithm packer = new MaxRectsAlgorithmNoBurst())
+            {
+                packer.Initialize(ATLAS_SIZE, ATLAS_SIZE);
+                Assert.IsTrue(packer.TryPack(100, 100, out var rect1));
+                Assert.IsTrue(packer.TryPack(100, 100, out var rect2));
+                
+                Assert.AreNotEqual(rect1, rect2);
+                Assert.IsFalse(RectsOverlap(rect1, rect2));
+            }
+        }
+
+        [Test]
         public void Algorithms_Clear_ResetsState()
         {
             // Tests that Clear() effectively resets the packer so it can be reused
             var algorithms = new IPackingAlgorithm[] 
             { 
-                new MaxRectsAlgorithm(), 
+#if PACKING_BURST_ENABLED
+                new MaxRectsAlgorithm(),
+#else
+                new MaxRectsAlgorithmNoBurst(), /* Fallback or test both? Let's assume NoBurst is available */
+#endif
+                new MaxRectsAlgorithmNoBurst(), /* Explicitly test NoBurst */
                 new SkylineAlgorithm(), 
                 new GuillotineAlgorithm(), 
                 new ShelfAlgorithm() 

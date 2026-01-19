@@ -282,6 +282,7 @@ namespace RuntimeAtlasPacker
                     // I don't see this error string in the provided `AtlasPersistence.cs` file content (lines 0-350 and earlier reads).
                     // It must be in the part I haven't read yet, typically `LoadAtlas` or inside `SaveAtlas` validation.
                     // Ah, looking at `SaveAtlasAsync`, I see debug logs.
+                    
                     // The error message format `[Error] [AtlasPersistence] ...` matches the class.
                     
                     // Let's search for "Texture is blank" in `AtlasPersistence.cs`.
@@ -1014,11 +1015,23 @@ namespace RuntimeAtlasPacker
         {
             IPackingAlgorithm packer = state.Algorithm switch
             {
+#if PACKING_BURST_ENABLED
                 PackingAlgorithm.MaxRects => new MaxRectsAlgorithm(),
                 PackingAlgorithm.Skyline => new SkylineAlgorithm(),
                 PackingAlgorithm.Guillotine => new GuillotineAlgorithm(),
                 PackingAlgorithm.Shelf => new ShelfAlgorithm(),
+#else
+                PackingAlgorithm.MaxRects => new MaxRectsAlgorithmNoBurst(),
+                // Fallback for others if they rely on burst/native collections
+                PackingAlgorithm.Skyline => new MaxRectsAlgorithmNoBurst(), 
+                PackingAlgorithm.Guillotine => new GuillotineAlgorithm(), // NoBurst, so fine
+                PackingAlgorithm.Shelf => new ShelfAlgorithm(), // NoBurst, so fine
+#endif
+#if PACKING_BURST_ENABLED
                 _ => new MaxRectsAlgorithm()
+#else
+                _ => new MaxRectsAlgorithmNoBurst()
+#endif
             };
 
             packer.Initialize(state.Width, state.Height);
@@ -1364,4 +1377,3 @@ namespace RuntimeAtlasPacker
 
     }
 }
-
