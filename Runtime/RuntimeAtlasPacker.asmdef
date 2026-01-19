@@ -1,0 +1,24 @@
+{
+  "name": "RuntimeAtlasPacker",
+  "rootNamespace": "RuntimeAtlasPacker",
+  "references": [
+    "Unity.Collections",
+    "Unity.Burst",
+    "Unity.Mathematics"
+  ],
+  "includePlatforms": [],
+  "excludePlatforms": [],
+  "allowUnsafeCode": true,
+  "overrideReferences": false,
+  "precompiledReferences": [],
+  "autoReferenced": true,
+  "defineConstraints": [],
+  "versionDefines": [
+    {
+      "name": "com.unity.burst",
+      "expression": "0.0.0",
+      "define": "PACKING_BURST_ENABLED"
+    }
+  ],
+  "noEngineReferences": false
+}
