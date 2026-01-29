@@ -146,11 +146,27 @@ Shader ""Hidden/RuntimeAtlasPacker/Blit""
                 
 #if UNITY_EDITOR || UNITY_IOS
                 Debug.Log($"[TextureBlitter.BatchBlit] RenderTexture allocated. Memory: {System.GC.GetTotalMemory(false) / 1024 / 1024} MB");
-                Debug.Log($"[TextureBlitter.BatchBlit] Copying existing atlas content...");
 #endif
                 
-                // Preserve existing atlas content
-                Graphics.Blit(target, rt);
+                // ✅ iOS FIX: Only preserve existing content if texture is readable
+                // Non-readable textures can't be read from, and typically have no content to preserve anyway
+                if (target.isReadable)
+                {
+#if UNITY_EDITOR || UNITY_IOS
+                    Debug.Log($"[TextureBlitter.BatchBlit] Copying existing atlas content from readable texture...");
+#endif
+                    Graphics.Blit(target, rt);
+                }
+                else
+                {
+#if UNITY_EDITOR || UNITY_IOS
+                    Debug.Log($"[TextureBlitter.BatchBlit] Skipping content preservation - target is non-readable. Clearing RenderTexture instead...");
+#endif
+                    // Clear the RenderTexture since we can't preserve content from non-readable texture
+                    RenderTexture.active = rt;
+                    GL.Clear(true, true, Color.clear);
+                    RenderTexture.active = null;
+                }
                 
                 // Activate RT for rendering
                 RenderTexture.active = rt;
@@ -285,8 +301,19 @@ Shader ""Hidden/RuntimeAtlasPacker/Blit""
                 );
                 rt.filterMode = FilterMode.Point;
                 
-                // Preserve existing atlas content by blitting target to RT
-                Graphics.Blit(target, rt);
+                // ✅ iOS FIX: Only preserve existing content if texture is readable
+                if (target.isReadable)
+                {
+                    // Preserve existing atlas content by blitting target to RT
+                    Graphics.Blit(target, rt);
+                }
+                else
+                {
+                    // Can't read from non-readable texture, clear instead
+                    RenderTexture.active = rt;
+                    GL.Clear(true, true, Color.clear);
+                    RenderTexture.active = null;
+                }
                 
                 // Activate RT for rendering
                 RenderTexture.active = rt;

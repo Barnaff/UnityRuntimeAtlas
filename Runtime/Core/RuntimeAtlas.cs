@@ -176,35 +176,6 @@ namespace RuntimeAtlasPacker
         {
             var pageIndex = _textures.Count;
             
-#if UNITY_IOS
-            // ✅ iOS EMERGENCY MEMORY RELIEF: If creating additional pages with Readable=true,
-            // make previous pages non-readable to free CPU memory and prevent OOM
-            if (pageIndex > 0 && _settings.Readable)
-            {
-                Debug.LogWarning($"[RuntimeAtlas.CreateNewPage] iOS: Creating page {pageIndex} with Readable=true. " +
-                    $"Converting previous {pageIndex} pages to non-readable to prevent OOM crash.");
-                
-                for (int i = 0; i < _textures.Count; i++)
-                {
-                    var prevTexture = _textures[i];
-                    if (prevTexture != null && prevTexture.isReadable)
-                    {
-                        try
-                        {
-                            // Make previous pages non-readable to free CPU memory
-                            prevTexture.Apply(false, true); // makeNoLongerReadable = true
-                            var freedMB = (prevTexture.width * prevTexture.height * 4) / 1024 / 1024;
-                            Debug.Log($"[RuntimeAtlas.CreateNewPage] iOS: Page {i} made non-readable, freed ~{freedMB}MB CPU memory");
-                        }
-                        catch (Exception ex)
-                        {
-                            Debug.LogWarning($"[RuntimeAtlas.CreateNewPage] iOS: Failed to make page {i} non-readable: {ex.Message}");
-                        }
-                    }
-                }
-            }
-#endif
-            
 #if UNITY_EDITOR || UNITY_IOS
             Debug.Log($"[RuntimeAtlas.CreateNewPage] Creating page {pageIndex}. Size: {_settings.InitialSize}x{_settings.InitialSize}, Format: {_settings.Format}, Readable: {_settings.Readable}. Memory before: {System.GC.GetTotalMemory(false) / 1024 / 1024} MB");
 #endif
@@ -313,6 +284,34 @@ namespace RuntimeAtlasPacker
                 System.GC.Collect();
                 var memAfter = System.GC.GetTotalMemory(false) / 1024 / 1024;
                 Debug.Log($"[RuntimeAtlas.CreateNewPage] iOS: Forced GC. Memory: {memBefore}MB → {memAfter}MB (freed {memBefore - memAfter}MB)");
+                
+                // ✅ iOS EMERGENCY MEMORY RELIEF: If we have multiple pages with Readable=true,
+                // and memory is getting tight, make OLDER pages (not the previous one) non-readable
+                // We keep the previous page readable briefly in case there are pending operations
+                if (_settings.Readable && pageIndex > 1 && memAfter > 80)
+                {
+                    Debug.LogWarning($"[RuntimeAtlas.CreateNewPage] iOS: Memory high ({memAfter}MB) with {pageIndex + 1} pages. " +
+                        $"Converting older pages to non-readable to prevent OOM crash.");
+                    
+                    // Convert pages 0 to pageIndex-2 (keep pageIndex-1 readable for now)
+                    for (int i = 0; i < pageIndex - 1; i++)
+                    {
+                        var prevTexture = _textures[i];
+                        if (prevTexture != null && prevTexture.isReadable)
+                        {
+                            try
+                            {
+                                prevTexture.Apply(false, true); // makeNoLongerReadable = true
+                                var freedMB = (prevTexture.width * prevTexture.height * 4) / 1024 / 1024;
+                                Debug.Log($"[RuntimeAtlas.CreateNewPage] iOS: Page {i} made non-readable, freed ~{freedMB}MB CPU memory");
+                            }
+                            catch (Exception ex)
+                            {
+                                Debug.LogWarning($"[RuntimeAtlas.CreateNewPage] iOS: Failed to make page {i} non-readable: {ex.Message}");
+                            }
+                        }
+                    }
+                }
             }
 #endif
         }
