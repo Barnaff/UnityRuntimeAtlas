@@ -140,24 +140,6 @@ namespace RuntimeAtlasPacker
 #endif
             }
             
-#if UNITY_IOS
-            // ✅ iOS: FORCE Readable=true to allow texture manipulation
-            // NOTE: This increases memory usage but is required for certain operations
-            if (!settings.Readable)
-            {
-                Debug.LogWarning($"[RuntimeAtlas] iOS: Forcing Readable=true (was false). " +
-                    $"This will increase memory usage but allows texture pixel access.");
-                settings.Readable = true;
-            }
-            
-            // ✅ iOS: Also enforce reasonable size limits to manage memory
-            if (settings.MaxSize > 2048)
-            {
-                Debug.LogWarning($"[RuntimeAtlas] iOS: Reducing MaxSize from {settings.MaxSize} to 2048 for memory safety.");
-                settings.MaxSize = 2048;
-            }
-#endif
-            
             _settings = settings;
             _entries = new Dictionary<int, AtlasEntry>(64);
             _entriesByName = new Dictionary<string, AtlasEntry>(64);
