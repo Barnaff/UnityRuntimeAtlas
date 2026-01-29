@@ -118,6 +118,16 @@ Shader ""Hidden/RuntimeAtlasPacker/Blit""
             RenderTexture rt = null;
             RenderTexture prevActive = RenderTexture.active;
             
+#if UNITY_IOS
+            // ✅ iOS MEMORY WARNING: Check available memory before large allocation
+            var memBeforeMB = System.GC.GetTotalMemory(false) / 1024 / 1024;
+            var rtSizeMB = (target.width * target.height * 4) / 1024 / 1024; // RGBA32 size estimate
+            if (memBeforeMB > 100) // Warn if memory usage is high
+            {
+                Debug.LogWarning($"[TextureBlitter.BatchBlit] iOS: High memory usage ({memBeforeMB}MB) before allocating {rtSizeMB}MB RenderTexture. May cause OOM.");
+            }
+#endif
+            
             try
             {
 #if UNITY_EDITOR || UNITY_IOS
@@ -200,6 +210,14 @@ Shader ""Hidden/RuntimeAtlasPacker/Blit""
                 
 #if UNITY_EDITOR || UNITY_IOS
                 Debug.Log($"[TextureBlitter.BatchBlit] ✓ Batch blit complete. Memory: {System.GC.GetTotalMemory(false) / 1024 / 1024} MB");
+#endif
+
+#if UNITY_IOS
+                // ✅ iOS MEMORY FIX: Force cleanup of temporary allocations after large operation
+                if (target.width >= 1024 || target.height >= 1024)
+                {
+                    Resources.UnloadUnusedAssets();
+                }
 #endif
             }
             catch (System.Exception ex)
