@@ -141,18 +141,16 @@ namespace RuntimeAtlasPacker
             }
             
 #if UNITY_IOS
-            // ✅ CRITICAL iOS FIX: FORCE Readable=false on iOS to prevent OOM crashes
-            // iOS has extremely strict memory limits and will kill the app with Readable=true
-            // This is a non-negotiable platform limitation
-            if (settings.Readable)
+            // ✅ iOS: FORCE Readable=true to allow texture manipulation
+            // NOTE: This increases memory usage but is required for certain operations
+            if (!settings.Readable)
             {
-                Debug.LogWarning($"[RuntimeAtlas] iOS: Forcing Readable=false (was true). " +
-                    $"iOS cannot handle readable atlases due to memory constraints. " +
-                    $"This will save 50% memory and prevent crashes.");
-                settings.Readable = false;
+                Debug.LogWarning($"[RuntimeAtlas] iOS: Forcing Readable=true (was false). " +
+                    $"This will increase memory usage but allows texture pixel access.");
+                settings.Readable = true;
             }
             
-            // ✅ iOS: Also enforce reasonable size limits
+            // ✅ iOS: Also enforce reasonable size limits to manage memory
             if (settings.MaxSize > 2048)
             {
                 Debug.LogWarning($"[RuntimeAtlas] iOS: Reducing MaxSize from {settings.MaxSize} to 2048 for memory safety.");
