@@ -140,6 +140,26 @@ namespace RuntimeAtlasPacker
 #endif
             }
             
+#if UNITY_IOS
+            // ✅ CRITICAL iOS FIX: FORCE Readable=false on iOS to prevent OOM crashes
+            // iOS has extremely strict memory limits and will kill the app with Readable=true
+            // This is a non-negotiable platform limitation
+            if (settings.Readable)
+            {
+                Debug.LogWarning($"[RuntimeAtlas] iOS: Forcing Readable=false (was true). " +
+                    $"iOS cannot handle readable atlases due to memory constraints. " +
+                    $"This will save 50% memory and prevent crashes.");
+                settings.Readable = false;
+            }
+            
+            // ✅ iOS: Also enforce reasonable size limits
+            if (settings.MaxSize > 2048)
+            {
+                Debug.LogWarning($"[RuntimeAtlas] iOS: Reducing MaxSize from {settings.MaxSize} to 2048 for memory safety.");
+                settings.MaxSize = 2048;
+            }
+#endif
+            
             _settings = settings;
             _entries = new Dictionary<int, AtlasEntry>(64);
             _entriesByName = new Dictionary<string, AtlasEntry>(64);
@@ -147,17 +167,6 @@ namespace RuntimeAtlasPacker
             _textures = new List<Texture2D>();
             _packers = new List<IPackingAlgorithm>();
             _currentPageIndex = 0;
-            
-#if UNITY_IOS
-            // ✅ iOS MEMORY WARNING: Alert developers about memory-hungry settings
-            if (_settings.Readable && _settings.MaxSize >= 2048)
-            {
-                var estimatedMemoryMB = (_settings.MaxSize * _settings.MaxSize * 4 * 2) / 1024 / 1024; // CPU + GPU
-                Debug.LogWarning($"[RuntimeAtlas] iOS WARNING: Creating atlas with Readable=true and MaxSize={_settings.MaxSize}. " +
-                    $"Each page will use ~{estimatedMemoryMB}MB of memory. This may cause OOM crashes on iOS! " +
-                    $"Consider using AtlasSettings.Mobile preset or set Readable=false to save 50% memory.");
-            }
-#endif
             
             // Register in global registry for debugging
             _registryId = _nextRegistryId++;
@@ -284,34 +293,6 @@ namespace RuntimeAtlasPacker
                 System.GC.Collect();
                 var memAfter = System.GC.GetTotalMemory(false) / 1024 / 1024;
                 Debug.Log($"[RuntimeAtlas.CreateNewPage] iOS: Forced GC. Memory: {memBefore}MB → {memAfter}MB (freed {memBefore - memAfter}MB)");
-                
-                // ✅ iOS EMERGENCY MEMORY RELIEF: If we have multiple pages with Readable=true,
-                // and memory is getting tight, make OLDER pages (not the previous one) non-readable
-                // We keep the previous page readable briefly in case there are pending operations
-                if (_settings.Readable && pageIndex > 1 && memAfter > 80)
-                {
-                    Debug.LogWarning($"[RuntimeAtlas.CreateNewPage] iOS: Memory high ({memAfter}MB) with {pageIndex + 1} pages. " +
-                        $"Converting older pages to non-readable to prevent OOM crash.");
-                    
-                    // Convert pages 0 to pageIndex-2 (keep pageIndex-1 readable for now)
-                    for (int i = 0; i < pageIndex - 1; i++)
-                    {
-                        var prevTexture = _textures[i];
-                        if (prevTexture != null && prevTexture.isReadable)
-                        {
-                            try
-                            {
-                                prevTexture.Apply(false, true); // makeNoLongerReadable = true
-                                var freedMB = (prevTexture.width * prevTexture.height * 4) / 1024 / 1024;
-                                Debug.Log($"[RuntimeAtlas.CreateNewPage] iOS: Page {i} made non-readable, freed ~{freedMB}MB CPU memory");
-                            }
-                            catch (Exception ex)
-                            {
-                                Debug.LogWarning($"[RuntimeAtlas.CreateNewPage] iOS: Failed to make page {i} non-readable: {ex.Message}");
-                            }
-                        }
-                    }
-                }
             }
 #endif
         }
