@@ -396,6 +396,18 @@ namespace RuntimeAtlasPacker
                 return (AddResult.InvalidTexture, null);
             }
 
+            // Validate pivot is in normalized range (0-1)
+            if (pivot.x < 0f || pivot.x > 1f || pivot.y < 0f || pivot.y > 1f)
+            {
+#if UNITY_EDITOR
+                Debug.LogWarning($"[RuntimeAtlas.Add] Pivot should be normalized (0-1 range). Got: {pivot}. " +
+                    "Clamping to valid range. If you intended to use pixel coordinates, convert them: " +
+                    "normalizedPivot = pixelPivot / textureSize");
+#endif
+                pivot.x = Mathf.Clamp01(pivot.x);
+                pivot.y = Mathf.Clamp01(pivot.y);
+            }
+
             // ✅ FIX: Check if texture is readable before proceeding
             if (!EnsureTextureReadable(texture))
             {
@@ -869,6 +881,18 @@ namespace RuntimeAtlasPacker
 
             var successfulEntries = new Dictionary<string, AtlasEntry>(textures.Count);
 
+            // ✅ OPTIMIZATION: Validate all textures are readable BEFORE starting batch
+            foreach (var kvp in textures)
+            {
+                if (kvp.Value != null && !EnsureTextureReadable(kvp.Value))
+                {
+#if UNITY_EDITOR
+                    Debug.LogError($"[RuntimeAtlas.AddBatch] Texture '{kvp.Value.name}' (key: '{kvp.Key}') is not readable. Aborting batch operation.");
+#endif
+                    return new Dictionary<string, AtlasEntry>();
+                }
+            }
+
             // ✅ OPTIMIZATION: Avoid LINQ - use manual sort with array
             var sortedList = new List<(string key, Texture2D tex, int area)>(textures.Count);
             foreach (var kvp in textures)
@@ -994,13 +1018,20 @@ namespace RuntimeAtlasPacker
                 
                 _version++;
                 _isDirty = true;
-            }
 
-            // ✅ MEMORY FIX: Make textures non-readable after batch blit to save memory
-            if (successCount > 0 && !_settings.Readable)
-            {
+                // ✅ OPTIMIZATION: Apply changes ONCE to all modified pages after ALL textures have been added
+                // This avoids toggling readable state multiple times per texture
+                bool makeNoLongerReadable = !_settings.Readable;
+                
 #if UNITY_EDITOR || UNITY_IOS
-                Debug.Log($"[RuntimeAtlas.AddBatch] Making {modifiedPages.Count} pages non-readable to save memory...");
+                if (makeNoLongerReadable)
+                {
+                    Debug.Log($"[RuntimeAtlas.AddBatch] Applying and making {modifiedPages.Count} pages non-readable to save memory...");
+                }
+                else
+                {
+                    Debug.Log($"[RuntimeAtlas.AddBatch] Applying changes to {modifiedPages.Count} pages (keeping readable)...");
+                }
 #endif
                 
                 try
@@ -1011,18 +1042,23 @@ namespace RuntimeAtlasPacker
                         {
                             var pageTexture = _textures[pageIndex];
                             
-                            // Only make non-readable if it's currently readable
-                            if (pageTexture.isReadable)
+                            // Skip if we're trying to make non-readable but it's already non-readable
+                            if (makeNoLongerReadable && !pageTexture.isReadable)
                             {
-#if UNITY_EDITOR || UNITY_IOS
-                                Debug.Log($"[RuntimeAtlas.AddBatch] → Page {pageIndex}: Making non-readable...");
+#if UNITY_EDITOR
+                                Debug.Log($"[RuntimeAtlas.AddBatch] Page {pageIndex} already non-readable, skipping Apply");
 #endif
-                                // Apply with makeNoLongerReadable=true to free CPU memory
-                                pageTexture.Apply(false, true);
-#if UNITY_EDITOR || UNITY_IOS
-                                Debug.Log($"[RuntimeAtlas.AddBatch] ✓ Page {pageIndex}: Now non-readable");
-#endif
+                                continue;
                             }
+                            
+                            // ✅ KEY OPTIMIZATION: Call Apply ONCE per page after all textures added
+                            // makeNoLongerReadable=true: Frees CPU memory (texture becomes non-readable)
+                            // makeNoLongerReadable=false: Keeps CPU memory (texture stays readable)
+                            pageTexture.Apply(false, makeNoLongerReadable);
+                            
+#if UNITY_EDITOR || UNITY_IOS
+                            Debug.Log($"[RuntimeAtlas.AddBatch] ✓ Page {pageIndex}: Applied (readable={!makeNoLongerReadable})");
+#endif
                         }
                     }
                     _isDirty = false;
@@ -1030,13 +1066,9 @@ namespace RuntimeAtlasPacker
                 catch (UnityException ex)
                 {
 #if UNITY_EDITOR || UNITY_IOS
-                    Debug.LogError($"[RuntimeAtlas.AddBatch] ✗ CRASH making pages non-readable: {ex.Message}\nStack: {ex.StackTrace}");
+                    Debug.LogError($"[RuntimeAtlas.AddBatch] ✗ Failed to apply texture changes: {ex.Message}\nStack: {ex.StackTrace}");
 #endif
                 }
-            }
-            else if (successCount > 0)
-            {
-                _isDirty = false;
             }
             
 #if UNITY_EDITOR || UNITY_IOS
@@ -1106,6 +1138,18 @@ namespace RuntimeAtlasPacker
 #if UNITY_EDITOR
             Debug.Log($"[RuntimeAtlas] AddBatch: Starting batch of {textures.Count} textures with individual versions");
 #endif
+
+            // ✅ OPTIMIZATION: Validate all textures are readable BEFORE starting batch
+            foreach (var kvp in textures)
+            {
+                if (kvp.Value != null && !EnsureTextureReadable(kvp.Value))
+                {
+#if UNITY_EDITOR
+                    Debug.LogError($"[RuntimeAtlas.AddBatch] Texture '{kvp.Value.name}' (key: '{kvp.Key}') is not readable. Aborting batch operation.");
+#endif
+                    return new Dictionary<string, AtlasEntry>();
+                }
+            }
 
             // ✅ OPTIMIZATION: Batch remove/check existing entries based on version
             foreach (var key in textures.Keys)
@@ -1198,16 +1242,24 @@ namespace RuntimeAtlasPacker
                 }
             }
 
-            // ✅ OPTIMIZATION: Apply only modified pages instead of all pages
+            // ✅ OPTIMIZATION: Apply changes ONCE to all modified pages after ALL textures have been added
+            // This avoids toggling readable state multiple times per texture
             if (successCount > 0)
             {
+                bool makeNoLongerReadable = !_settings.Readable;
+                
                 try
                 {
 #if UNITY_EDITOR
-                    Debug.Log($"[RuntimeAtlas] AddBatch: Applying texture changes for {successCount} textures across {modifiedPages.Count} pages (of {_textures.Count} total)");
+                    if (makeNoLongerReadable)
+                    {
+                        Debug.Log($"[RuntimeAtlas] AddBatch: Applying and making {modifiedPages.Count} pages non-readable to save memory...");
+                    }
+                    else
+                    {
+                        Debug.Log($"[RuntimeAtlas] AddBatch: Applying changes to {modifiedPages.Count} pages (keeping readable)...");
+                    }
 #endif
-                    // ✅ MEMORY FIX: Use makeNoLongerReadable to free CPU memory immediately on non-readable atlases
-                    bool makeNoLongerReadable = !_settings.Readable;
                     
                     foreach (var pageIndex in modifiedPages)
                     {
@@ -1215,8 +1267,7 @@ namespace RuntimeAtlasPacker
                         {
                             var pageTexture = _textures[pageIndex];
                             
-                            // ✅ FIX: Skip Apply if texture is already non-readable
-                            // Calling Apply(false, true) on an already non-readable texture fails
+                            // Skip if we're trying to make non-readable but it's already non-readable
                             if (makeNoLongerReadable && !pageTexture.isReadable)
                             {
 #if UNITY_EDITOR
@@ -1225,7 +1276,14 @@ namespace RuntimeAtlasPacker
                                 continue;
                             }
                             
+                            // ✅ KEY OPTIMIZATION: Call Apply ONCE per page after all textures added
+                            // makeNoLongerReadable=true: Frees CPU memory (texture becomes non-readable)
+                            // makeNoLongerReadable=false: Keeps CPU memory (texture stays readable)
                             pageTexture.Apply(false, makeNoLongerReadable);
+                            
+#if UNITY_EDITOR
+                            Debug.Log($"[RuntimeAtlas] AddBatch: ✓ Page {pageIndex}: Applied (readable={!makeNoLongerReadable})");
+#endif
                         }
                     }
                     _isDirty = false;

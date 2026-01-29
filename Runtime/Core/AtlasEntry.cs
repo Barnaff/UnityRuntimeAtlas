@@ -175,7 +175,26 @@ namespace RuntimeAtlasPacker
 
         private Sprite CreateSpriteInternal(float pixelsPerUnit, Vector2 pivot, Vector4 border)
         {
+            // Validate pivot is in normalized range (0-1)
+            // If pivot values are outside this range, it likely means pixel values were passed instead
+            if (pivot.x < 0f || pivot.x > 1f || pivot.y < 0f || pivot.y > 1f)
+            {
+#if UNITY_EDITOR
+                UnityEngine.Debug.LogWarning($"[AtlasEntry] Pivot values should be normalized (0-1 range). Got: {pivot}. " +
+                    "Values outside 0-1 suggest pixel coordinates were passed instead of normalized coordinates.");
+#endif
+                // Clamp to valid range to prevent unexpected behavior
+                pivot.x = Mathf.Clamp01(pivot.x);
+                pivot.y = Mathf.Clamp01(pivot.y);
+            }
+            
             // Use the full Sprite.Create overload for proper sprite properties
+            // IMPORTANT: pivot is normalized (0-1) where:
+            //   (0, 0) = bottom-left of sprite rect
+            //   (0.5, 0.5) = center of sprite rect (default)
+            //   (1, 1) = top-right of sprite rect
+            // Unity will convert this to pixel coordinates: pixelPivot = pivot * rectSize
+            // The rect position (_pixelRect.x, _pixelRect.y) does NOT affect pivot calculation.
             var sprite = Sprite.Create(
                 texture: Texture,
                 rect: new UnityEngine.Rect(_pixelRect.x, _pixelRect.y, _pixelRect.width, _pixelRect.height),
