@@ -23,8 +23,16 @@ namespace RuntimeAtlasPacker.Editor
         private string _selectedAtlasName;
         
         private int _selectedTab;
-        private readonly string[] _tabNames = { "Atlases", "Renderers", "Statistics", "Tools", "Textures" };
+        private readonly string[] _tabNames = { "Atlases", "Renderers", "Statistics", "Tools", "Textures", "Saved Atlases" };
         private Vector2 _texturesTabScroll;
+        
+        // Saved Atlases tab
+        private List<SavedAtlasInfo> _savedAtlasesCache = new();
+        private SavedAtlasInfo _selectedSavedAtlas;
+        private Vector2 _savedAtlasListScroll;
+        private Vector2 _savedAtlasDetailsScroll;
+        private List<string> _playModeSavedPaths = new(); // Track atlases saved during play mode
+        private int _selectedSavedAtlasPageIndex = 0; // For page browsing in saved atlases
         
         private Texture2D _draggedTexture;
         private bool _showAtlasPreview = true;
@@ -75,6 +83,22 @@ namespace RuntimeAtlasPacker.Editor
             EditorApplication.update -= OnEditorUpdate;
             EditorApplication.playModeStateChanged -= OnPlayModeChanged;
             RuntimeAtlasProfiler.OnOperationLogged -= OnAtlasOperation;
+            
+            // Clean up loaded saved atlas textures
+            foreach (var info in _savedAtlasesCache)
+            {
+                if (info.LoadedTextures != null)
+                {
+                    foreach (var tex in info.LoadedTextures)
+                    {
+                        if (tex != null)
+                        {
+                            DestroyImmediate(tex);
+                        }
+                    }
+                }
+            }
+            _savedAtlasesCache.Clear();
         }
 
         private void OnPlayModeChanged(PlayModeStateChange state)
@@ -111,6 +135,19 @@ namespace RuntimeAtlasPacker.Editor
 
         private void OnAtlasOperation(ProfileData data)
         {
+            // Track save operations during play mode
+            if (EditorApplication.isPlaying && 
+                (data.OperationType == "SaveAtlas" || data.OperationType == "SaveAtlasAsync"))
+            {
+                // Extract file path from details
+                var filePath = data.Details;
+                if (!string.IsNullOrEmpty(filePath) && !_playModeSavedPaths.Contains(filePath))
+                {
+                    _playModeSavedPaths.Add(filePath);
+                    Debug.Log($"[AtlasDebugWindow] Tracked saved atlas: {filePath}");
+                }
+            }
+            
             // Any atlas operation triggers refresh
             if (EditorApplication.isPlaying)
             {
@@ -475,6 +512,9 @@ namespace RuntimeAtlasPacker.Editor
                     break;
                 case 4:
                     DrawTexturesTab();
+                    break;
+                case 5:
+                    DrawSavedAtlasesTab();
                     break;
             }
         }
@@ -1739,6 +1779,596 @@ namespace RuntimeAtlasPacker.Editor
             }
             
             return path;
+        }
+
+        // ============================
+        // Saved Atlases Tab
+        // ============================
+
+        private struct SavedAtlasInfo
+        {
+            public string FilePath;
+            public string DisplayName;
+            public AtlasSerializationData Data;
+            public List<Texture2D> LoadedTextures;
+            public bool IsLoaded;
+            public long FileSize;
+            public DateTime LastModified;
+            public int PageCount;
+            public int EntryCount;
+
+            public bool Equals(SavedAtlasInfo other)
+            {
+                return FilePath == other.FilePath;
+            }
+        }
+
+        private void DrawSavedAtlasesTab()
+        {
+            EditorGUILayout.BeginHorizontal();
+            EditorGUILayout.LabelField("Saved Atlases Inspector", EditorStyles.boldLabel);
+            
+            if (GUILayout.Button("Refresh", GUILayout.Width(80)))
+            {
+                RefreshSavedAtlases();
+            }
+            
+            if (GUILayout.Button("Browse...", GUILayout.Width(80)))
+            {
+                BrowseForSavedAtlas();
+            }
+            
+            if (GUILayout.Button("Clear List", GUILayout.Width(80)))
+            {
+                ClearSavedAtlasesList();
+            }
+            
+            EditorGUILayout.EndHorizontal();
+
+            EditorGUILayout.Space(5);
+
+            // Help box in Edit mode
+            if (!EditorApplication.isPlaying)
+            {
+                EditorGUILayout.HelpBox(
+                    "This tab allows you to inspect saved atlases from disk in Edit Mode.\n\n" +
+                    "• Click 'Browse...' to load an atlas from disk\n" +
+                    "• Atlases saved during Play mode are automatically tracked\n" +
+                    "• View atlas pages, sprite rects, and metadata",
+                    MessageType.Info
+                );
+                EditorGUILayout.Space(5);
+            }
+
+            // Show play mode saved atlases info
+            if (_playModeSavedPaths.Count > 0)
+            {
+                EditorGUILayout.BeginVertical("box");
+                EditorGUILayout.LabelField($"Atlases Saved During Play Mode: {_playModeSavedPaths.Count}", EditorStyles.boldLabel);
+                
+                if (GUILayout.Button("Load All Play Mode Atlases"))
+                {
+                    foreach (var path in _playModeSavedPaths)
+                    {
+                        LoadSavedAtlas(path);
+                    }
+                }
+                
+                EditorGUILayout.EndVertical();
+                EditorGUILayout.Space(5);
+            }
+
+            if (_savedAtlasesCache.Count == 0)
+            {
+                EditorGUILayout.Space(20);
+                EditorGUILayout.HelpBox("No saved atlases loaded. Click 'Browse...' to load an atlas file.", MessageType.Info);
+                return;
+            }
+
+            EditorGUILayout.BeginHorizontal();
+            
+            // Left panel - Saved atlas list
+            EditorGUILayout.BeginVertical(GUILayout.Width(250));
+            DrawSavedAtlasList();
+            EditorGUILayout.EndVertical();
+            
+            // Splitter
+            GUILayout.Box("", GUILayout.Width(2), GUILayout.ExpandHeight(true));
+            
+            // Right panel - Saved atlas details
+            _savedAtlasDetailsScroll = EditorGUILayout.BeginScrollView(_savedAtlasDetailsScroll);
+            if (_selectedSavedAtlas.IsLoaded)
+            {
+                DrawSavedAtlasDetails();
+            }
+            else
+            {
+                EditorGUILayout.HelpBox("Select a saved atlas from the list to view details.", MessageType.Info);
+            }
+            EditorGUILayout.EndScrollView();
+            
+            EditorGUILayout.EndHorizontal();
+        }
+
+        private void DrawSavedAtlasList()
+        {
+            EditorGUILayout.LabelField($"Saved Atlases ({_savedAtlasesCache.Count})", EditorStyles.boldLabel);
+            
+            _savedAtlasListScroll = EditorGUILayout.BeginScrollView(_savedAtlasListScroll);
+            
+            foreach (var info in _savedAtlasesCache)
+            {
+                bool isSelected = _selectedSavedAtlas.FilePath == info.FilePath;
+                
+                var cellStyle = new GUIStyle(isSelected ? "SelectionRect" : "box");
+                cellStyle.alignment = TextAnchor.MiddleLeft;
+                cellStyle.padding = new RectOffset(5, 5, 5, 5);
+                
+                if (GUILayout.Button("", cellStyle, GUILayout.Height(50), GUILayout.ExpandWidth(true)))
+                {
+                    _selectedSavedAtlas = info;
+                    _selectedSavedAtlasPageIndex = 0; // Reset to first page when selecting new atlas
+                }
+                
+                var lastRect = GUILayoutUtility.GetLastRect();
+                
+                // Icon
+                var icon = EditorGUIUtility.IconContent("d_PreTextureMipMapHigh");
+                var iconRect = new Rect(lastRect.x + 5, lastRect.y + lastRect.height / 2 - 10, 20, 20);
+                GUI.Label(iconRect, icon);
+                
+                // Name
+                var nameRect = new Rect(lastRect.x + 30, lastRect.y + 5, lastRect.width - 35, 16);
+                GUI.Label(nameRect, info.DisplayName, EditorStyles.boldLabel);
+                
+                // Details line 1
+                var details1Rect = new Rect(lastRect.x + 30, lastRect.y + 22, lastRect.width - 35, 12);
+                GUI.Label(details1Rect, $"{info.PageCount} page(s), {info.EntryCount} entries", EditorStyles.miniLabel);
+                
+                // Details line 2
+                var details2Rect = new Rect(lastRect.x + 30, lastRect.y + 34, lastRect.width - 35, 12);
+                GUI.Label(details2Rect, $"{FormatBytes(info.FileSize)} - {info.LastModified:yyyy-MM-dd HH:mm}", EditorStyles.miniLabel);
+            }
+            
+            EditorGUILayout.EndScrollView();
+        }
+
+        private void DrawSavedAtlasDetails()
+        {
+            var info = _selectedSavedAtlas;
+            
+            // Header with actions
+            EditorGUILayout.BeginHorizontal();
+            EditorGUILayout.LabelField($"Atlas: {info.DisplayName}", EditorStyles.boldLabel);
+            
+            GUILayout.FlexibleSpace();
+            
+            if (GUILayout.Button("Show in Explorer", GUILayout.Width(120)))
+            {
+                ShowAtlasInFileExplorer(info.FilePath);
+            }
+            
+            if (GUILayout.Button("Unload", GUILayout.Width(60)))
+            {
+                UnloadSavedAtlas(info);
+                return;
+            }
+            
+            EditorGUILayout.EndHorizontal();
+
+            EditorGUILayout.Space(5);
+
+            // File info
+            EditorGUILayout.BeginVertical("box");
+            EditorGUILayout.LabelField("File Information", EditorStyles.boldLabel);
+            EditorGUILayout.LabelField($"Path: {info.FilePath}");
+            EditorGUILayout.LabelField($"Size: {FormatBytes(info.FileSize)}");
+            EditorGUILayout.LabelField($"Modified: {info.LastModified:yyyy-MM-dd HH:mm:ss}");
+            EditorGUILayout.EndVertical();
+
+            EditorGUILayout.Space(5);
+
+            // Atlas info
+            EditorGUILayout.BeginVertical("box");
+            EditorGUILayout.LabelField("Atlas Information", EditorStyles.boldLabel);
+            
+            if (info.Data != null)
+            {
+                EditorGUILayout.LabelField($"Pages: {info.Data.Pages?.Count ?? 0}");
+                EditorGUILayout.LabelField($"Entries: {info.Data.Entries?.Count ?? 0}");
+                EditorGUILayout.LabelField($"Version: {info.Data.Version}");
+                
+                if (info.Data.Settings != null)
+                {
+                    EditorGUILayout.Space(3);
+                    EditorGUILayout.LabelField("Settings:", EditorStyles.boldLabel);
+                    EditorGUI.indentLevel++;
+                    EditorGUILayout.LabelField($"Initial Size: {info.Data.Settings.InitialSize}");
+                    EditorGUILayout.LabelField($"Max Size: {info.Data.Settings.MaxSize}");
+                    EditorGUILayout.LabelField($"Max Pages: {(info.Data.Settings.MaxPageCount == -1 ? "Unlimited" : info.Data.Settings.MaxPageCount.ToString())}");
+                    EditorGUILayout.LabelField($"Padding: {info.Data.Settings.Padding}");
+                    EditorGUILayout.LabelField($"Format: {info.Data.Settings.Format}");
+                    EditorGUILayout.LabelField($"Algorithm: {info.Data.Settings.Algorithm}");
+                    EditorGUILayout.LabelField($"Readable: {info.Data.Settings.Readable}");
+                    EditorGUILayout.LabelField($"Mipmaps: {info.Data.Settings.GenerateMipMaps}");
+                    EditorGUI.indentLevel--;
+                }
+            }
+            
+            EditorGUILayout.EndVertical();
+
+            EditorGUILayout.Space(5);
+
+            // Page previews
+            if (info.LoadedTextures != null && info.LoadedTextures.Count > 0)
+            {
+                EditorGUILayout.LabelField("Atlas Pages", EditorStyles.boldLabel);
+                
+                int pageCount = info.LoadedTextures.Count;
+                
+                // Ensure selected page is valid
+                if (_selectedSavedAtlasPageIndex >= pageCount)
+                    _selectedSavedAtlasPageIndex = 0;
+                
+                // Page navigation controls
+                if (pageCount > 1)
+                {
+                    EditorGUILayout.BeginHorizontal();
+                    EditorGUILayout.LabelField("Page:", GUILayout.Width(40));
+                    
+                    // Previous button
+                    GUI.enabled = _selectedSavedAtlasPageIndex > 0;
+                    if (GUILayout.Button("◄", GUILayout.Width(30)))
+                    {
+                        _selectedSavedAtlasPageIndex--;
+                    }
+                    GUI.enabled = true;
+                    
+                    // Page slider
+                    int newPageIndex = EditorGUILayout.IntSlider(_selectedSavedAtlasPageIndex, 0, pageCount - 1);
+                    if (newPageIndex != _selectedSavedAtlasPageIndex)
+                    {
+                        _selectedSavedAtlasPageIndex = newPageIndex;
+                    }
+                    
+                    // Next button
+                    GUI.enabled = _selectedSavedAtlasPageIndex < pageCount - 1;
+                    if (GUILayout.Button("►", GUILayout.Width(30)))
+                    {
+                        _selectedSavedAtlasPageIndex++;
+                    }
+                    GUI.enabled = true;
+                    
+                    EditorGUILayout.LabelField($"of {pageCount - 1}", GUILayout.Width(50));
+                    EditorGUILayout.EndHorizontal();
+                    
+                    EditorGUILayout.Space(5);
+                }
+                else
+                {
+                    _selectedSavedAtlasPageIndex = 0;
+                }
+                
+                // Display current page
+                int i = _selectedSavedAtlasPageIndex;
+                if (i < info.LoadedTextures.Count)
+                {
+                    var texture = info.LoadedTextures[i];
+                    if (texture != null)
+                    {
+                        EditorGUILayout.BeginVertical("box");
+                        
+                        // Page info
+                        EditorGUILayout.LabelField($"Page {i} - {texture.width}x{texture.height}", EditorStyles.boldLabel);
+                        
+                        if (info.Data.Pages != null && i < info.Data.Pages.Count)
+                        {
+                            var pageData = info.Data.Pages[i];
+                            EditorGUILayout.LabelField($"Dimensions: {pageData.Width}x{pageData.Height}");
+                            
+                            if (pageData.PackerState != null)
+                            {
+                                EditorGUILayout.LabelField($"Algorithm: {pageData.PackerState.Algorithm}");
+                                EditorGUILayout.LabelField($"Used Rects: {pageData.PackerState.UsedRects?.Count ?? 0}");
+                            }
+                        }
+                        
+                        EditorGUILayout.Space(5);
+                        
+                        // Preview
+                        float maxWidth = position.width - 300;
+                        float aspect = (float)texture.height / texture.width;
+                        float previewWidth = Mathf.Min(maxWidth, texture.width);
+                        float previewHeight = previewWidth * aspect;
+                        
+                        var rect = GUILayoutUtility.GetRect(previewWidth, previewHeight);
+                        EditorGUI.DrawPreviewTexture(rect, texture, null, ScaleMode.ScaleToFit);
+                        
+                        // Calculate actual texture display rect (accounting for ScaleToFit letterboxing)
+                        float textureAspect = (float)texture.width / texture.height;
+                        float rectAspect = rect.width / rect.height;
+                        Rect textureRect;
+                        
+                        if (textureAspect > rectAspect)
+                        {
+                            // Texture is wider - letterbox top/bottom
+                            float displayHeight = rect.width / textureAspect;
+                            float yOffset = (rect.height - displayHeight) * 0.5f;
+                            textureRect = new Rect(rect.x, rect.y + yOffset, rect.width, displayHeight);
+                        }
+                        else
+                        {
+                            // Texture is taller - letterbox left/right
+                            float displayWidth = rect.height * textureAspect;
+                            float xOffset = (rect.width - displayWidth) * 0.5f;
+                            textureRect = new Rect(rect.x + xOffset, rect.y, displayWidth, rect.height);
+                        }
+                        
+                        // Draw sprite rects on top
+                        if (info.Data.Entries != null)
+                        {
+                            var entriesOnPage = info.Data.Entries.Where(e => e.TextureIndex == i).ToList();
+                            
+                            foreach (var entry in entriesOnPage)
+                            {
+                                var uvRect = new Rect(entry.UVRect.X, entry.UVRect.Y, entry.UVRect.Width, entry.UVRect.Height);
+                                var entryRect = new Rect(
+                                    textureRect.x + uvRect.x * textureRect.width,
+                                    textureRect.y + (1 - uvRect.y - uvRect.height) * textureRect.height,
+                                    uvRect.width * textureRect.width,
+                                    uvRect.height * textureRect.height
+                                );
+                                
+                                Handles.DrawSolidRectangleWithOutline(entryRect, 
+                                    new Color(0, 1, 0, 0.1f), new Color(0, 1, 0, 0.5f));
+                            }
+                            
+                            // Position sprite count label on actual texture rect
+                            EditorGUI.LabelField(new Rect(textureRect.x + 5, textureRect.y + 5, 200, 20),
+                                $"Page {i}: {entriesOnPage.Count} sprites",
+                                EditorStyles.whiteBoldLabel);
+                        }
+                        
+                        EditorGUILayout.EndVertical();
+                    }
+                }
+            }
+
+            EditorGUILayout.Space(5);
+
+            // Entries list
+            if (info.Data?.Entries != null && info.Data.Entries.Count > 0)
+            {
+                EditorGUILayout.LabelField($"Sprite Entries ({info.Data.Entries.Count})", EditorStyles.boldLabel);
+                
+                var foldoutKey = $"saved_atlas_entries_{info.FilePath}";
+                var isExpanded = EditorPrefs.GetBool(foldoutKey, false);
+                isExpanded = EditorGUILayout.Foldout(isExpanded, "Show All Entries", true);
+                EditorPrefs.SetBool(foldoutKey, isExpanded);
+                
+                if (isExpanded)
+                {
+                    EditorGUILayout.BeginVertical("box");
+                    
+                    // Header
+                    EditorGUILayout.BeginHorizontal("box");
+                    EditorGUILayout.LabelField("ID", EditorStyles.boldLabel, GUILayout.Width(40));
+                    EditorGUILayout.LabelField("Name", EditorStyles.boldLabel, GUILayout.Width(150));
+                    EditorGUILayout.LabelField("Page", EditorStyles.boldLabel, GUILayout.Width(40));
+                    EditorGUILayout.LabelField("Size", EditorStyles.boldLabel, GUILayout.Width(80));
+                    EditorGUILayout.LabelField("Position", EditorStyles.boldLabel, GUILayout.Width(100));
+                    EditorGUILayout.LabelField("UV", EditorStyles.boldLabel);
+                    EditorGUILayout.EndHorizontal();
+                    
+                    // Entries
+                    foreach (var entry in info.Data.Entries.OrderBy(e => e.TextureIndex).ThenBy(e => e.Id))
+                    {
+                        EditorGUILayout.BeginHorizontal("box");
+                        EditorGUILayout.LabelField(entry.Id.ToString(), GUILayout.Width(40));
+                        EditorGUILayout.LabelField(entry.Name ?? "-", GUILayout.Width(150));
+                        EditorGUILayout.LabelField(entry.TextureIndex.ToString(), GUILayout.Width(40));
+                        EditorGUILayout.LabelField($"{entry.PixelRect.Width}x{entry.PixelRect.Height}", GUILayout.Width(80));
+                        EditorGUILayout.LabelField($"({entry.PixelRect.X}, {entry.PixelRect.Y})", GUILayout.Width(100));
+                        EditorGUILayout.LabelField($"({entry.UVRect.X:F3}, {entry.UVRect.Y:F3}, {entry.UVRect.Width:F3}, {entry.UVRect.Height:F3})", EditorStyles.miniLabel);
+                        EditorGUILayout.EndHorizontal();
+                    }
+                    
+                    EditorGUILayout.EndVertical();
+                }
+            }
+        }
+
+        private void RefreshSavedAtlases()
+        {
+            // Keep existing atlases but refresh their data
+            for (int i = _savedAtlasesCache.Count - 1; i >= 0; i--)
+            {
+                var info = _savedAtlasesCache[i];
+                var jsonPath = info.FilePath + ".json";
+                
+                if (System.IO.File.Exists(jsonPath))
+                {
+                    // Refresh file info
+                    var fileInfo = new System.IO.FileInfo(jsonPath);
+                    var updatedInfo = info;
+                    updatedInfo.LastModified = fileInfo.LastWriteTime;
+                    updatedInfo.FileSize = fileInfo.Length;
+                    
+                    // Add page file sizes
+                    for (int p = 0; p < info.PageCount; p++)
+                    {
+                        var pagePath = $"{info.FilePath}_page{p}.png";
+                        if (System.IO.File.Exists(pagePath))
+                        {
+                            var pageFileInfo = new System.IO.FileInfo(pagePath);
+                            updatedInfo.FileSize += pageFileInfo.Length;
+                        }
+                    }
+                    
+                    _savedAtlasesCache[i] = updatedInfo;
+                }
+                else
+                {
+                    // File no longer exists, remove from cache
+                    UnloadSavedAtlas(info);
+                    _savedAtlasesCache.RemoveAt(i);
+                }
+            }
+            
+            Repaint();
+            Debug.Log($"[AtlasDebugWindow] Refreshed {_savedAtlasesCache.Count} saved atlases");
+        }
+
+        private void BrowseForSavedAtlas()
+        {
+            var path = EditorUtility.OpenFilePanel("Load Saved Atlas", Application.persistentDataPath, "json");
+            if (string.IsNullOrEmpty(path)) return;
+            
+            // Remove .json extension if present
+            if (path.EndsWith(".json"))
+            {
+                path = path.Substring(0, path.Length - 5);
+            }
+            
+            LoadSavedAtlas(path);
+        }
+
+        private void LoadSavedAtlas(string filePath)
+        {
+            try
+            {
+                var jsonPath = filePath + ".json";
+                
+                if (!System.IO.File.Exists(jsonPath))
+                {
+                    Debug.LogError($"[AtlasDebugWindow] Atlas file not found: {jsonPath}");
+                    EditorUtility.DisplayDialog("Error", $"Atlas file not found:\n{jsonPath}", "OK");
+                    return;
+                }
+                
+                // Check if already loaded
+                if (_savedAtlasesCache.Any(a => a.FilePath == filePath))
+                {
+                    Debug.LogWarning($"[AtlasDebugWindow] Atlas already loaded: {filePath}");
+                    _selectedSavedAtlas = _savedAtlasesCache.First(a => a.FilePath == filePath);
+                    Repaint();
+                    return;
+                }
+                
+                // Load JSON data
+                var json = System.IO.File.ReadAllText(jsonPath);
+                var data = JsonUtility.FromJson<AtlasSerializationData>(json);
+                
+                if (data == null)
+                {
+                    Debug.LogError($"[AtlasDebugWindow] Failed to deserialize atlas data from: {jsonPath}");
+                    return;
+                }
+                
+                // Load textures
+                var textures = new List<Texture2D>();
+                for (int i = 0; i < (data.Pages?.Count ?? 0); i++)
+                {
+                    var texturePath = $"{filePath}_page{i}.png";
+                    
+                    if (!System.IO.File.Exists(texturePath))
+                    {
+                        Debug.LogWarning($"[AtlasDebugWindow] Texture page file not found: {texturePath}");
+                        continue;
+                    }
+                    
+                    var pngData = System.IO.File.ReadAllBytes(texturePath);
+                    var texture = new Texture2D(2, 2, TextureFormat.RGBA32, false);
+                    texture.LoadImage(pngData);
+                    texture.name = $"{System.IO.Path.GetFileName(filePath)}_page{i}";
+                    textures.Add(texture);
+                }
+                
+                // Get file info
+                var fileInfo = new System.IO.FileInfo(jsonPath);
+                long totalSize = fileInfo.Length;
+                
+                for (int i = 0; i < textures.Count; i++)
+                {
+                    var pagePath = $"{filePath}_page{i}.png";
+                    if (System.IO.File.Exists(pagePath))
+                    {
+                        var pageFileInfo = new System.IO.FileInfo(pagePath);
+                        totalSize += pageFileInfo.Length;
+                    }
+                }
+                
+                var savedInfo = new SavedAtlasInfo
+                {
+                    FilePath = filePath,
+                    DisplayName = System.IO.Path.GetFileName(filePath),
+                    Data = data,
+                    LoadedTextures = textures,
+                    IsLoaded = true,
+                    FileSize = totalSize,
+                    LastModified = fileInfo.LastWriteTime,
+                    PageCount = data.Pages?.Count ?? 0,
+                    EntryCount = data.Entries?.Count ?? 0
+                };
+                
+                _savedAtlasesCache.Add(savedInfo);
+                _selectedSavedAtlas = savedInfo;
+                
+                Debug.Log($"[AtlasDebugWindow] Loaded saved atlas: {filePath} ({textures.Count} pages, {data.Entries?.Count ?? 0} entries)");
+                Repaint();
+            }
+            catch (System.Exception ex)
+            {
+                Debug.LogError($"[AtlasDebugWindow] Failed to load saved atlas: {ex.Message}\n{ex.StackTrace}");
+                EditorUtility.DisplayDialog("Error", $"Failed to load atlas:\n{ex.Message}", "OK");
+            }
+        }
+
+        private void UnloadSavedAtlas(SavedAtlasInfo info)
+        {
+            // Clean up textures
+            if (info.LoadedTextures != null)
+            {
+                foreach (var tex in info.LoadedTextures)
+                {
+                    if (tex != null)
+                    {
+                        DestroyImmediate(tex);
+                    }
+                }
+            }
+            
+            _savedAtlasesCache.Remove(info);
+            
+            if (_selectedSavedAtlas.FilePath == info.FilePath)
+            {
+                _selectedSavedAtlas = default;
+            }
+            
+            Debug.Log($"[AtlasDebugWindow] Unloaded saved atlas: {info.FilePath}");
+            Repaint();
+        }
+
+        private void ClearSavedAtlasesList()
+        {
+            if (!EditorUtility.DisplayDialog("Clear Saved Atlases", 
+                "This will unload all saved atlases from the inspector. The files on disk will not be deleted.", 
+                "Clear", "Cancel"))
+            {
+                return;
+            }
+            
+            foreach (var info in _savedAtlasesCache.ToList())
+            {
+                UnloadSavedAtlas(info);
+            }
+            
+            _playModeSavedPaths.Clear();
+            _savedAtlasesCache.Clear();
+            _selectedSavedAtlas = default;
+            
+            Debug.Log("[AtlasDebugWindow] Cleared all saved atlases from inspector");
+            Repaint();
         }
     }
 }
