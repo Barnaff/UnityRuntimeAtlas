@@ -871,14 +871,10 @@ namespace RuntimeAtlasPacker
                     // ✅ CRITICAL FIX: Create as READABLE 
                     // The 3rd parameter (mipChain) determines if mipmaps are generated
                     // We do NOT pass a 5th parameter - Unity will create a readable texture by default
-#if UNITY_IOS
-                    // ✅ iOS FIX: Always use RGBA32 when loading from PNG to avoid SIMD conversion crashes
-                    // LoadImage() on iOS may internally use ARGB32, causing format mismatch with other formats
-                    // This prevents crashes in RemapSIMDWithPermute<TexFormatARGB8888, TexFormatRGBA8888>
+                    // ✅ PLATFORM FIX: Always use RGBA32 when loading from PNG to avoid SIMD conversion issues
+                    // PNG files are naturally RGBA format, using RGBA32 prevents format conversion issues
+                    // This prevents crashes in RemapSIMDWithPermute on mobile platforms (iOS/Android)
                     var texture = new Texture2D(2, 2, TextureFormat.RGBA32, settings.GenerateMipMaps);
-#else
-                    var texture = new Texture2D(2, 2, settings.Format, settings.GenerateMipMaps);
-#endif
                     texture.filterMode = settings.FilterMode;
                     texture.wrapMode = TextureWrapMode.Clamp;
                     texture.name = $"RuntimeAtlas_Page{i}_Loaded";
@@ -1064,14 +1060,10 @@ namespace RuntimeAtlasPacker
                     // ✅ CRITICAL FIX: Create as READABLE 
                     // The 3rd parameter (mipChain) determines if mipmaps are generated
                     // We do NOT pass a 5th parameter - Unity will create a readable texture by default
-#if UNITY_IOS
-                    // ✅ iOS FIX: Always use RGBA32 when loading from PNG to avoid SIMD conversion crashes
-                    // LoadImage() on iOS may internally use ARGB32, causing format mismatch with other formats
-                    // This prevents crashes in RemapSIMDWithPermute<TexFormatARGB8888, TexFormatRGBA8888>
+                    // ✅ PLATFORM FIX: Always use RGBA32 when loading from PNG to avoid SIMD conversion issues
+                    // PNG files are naturally RGBA format, using RGBA32 prevents format conversion issues
+                    // This prevents crashes in RemapSIMDWithPermute on mobile platforms (iOS/Android)
                     var texture = new Texture2D(2, 2, TextureFormat.RGBA32, settings.GenerateMipMaps);
-#else
-                    var texture = new Texture2D(2, 2, settings.Format, settings.GenerateMipMaps);
-#endif
                     texture.filterMode = settings.FilterMode;
                     texture.wrapMode = TextureWrapMode.Clamp;
                     texture.name = $"RuntimeAtlas_Page{i}_Loaded";

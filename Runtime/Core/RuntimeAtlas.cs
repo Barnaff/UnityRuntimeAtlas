@@ -222,7 +222,7 @@ namespace RuntimeAtlasPacker
         {
             var pageIndex = _textures.Count;
             
-#if UNITY_EDITOR || UNITY_IOS
+#if UNITY_EDITOR
             Debug.Log($"[RuntimeAtlas.CreateNewPage] Creating page {pageIndex}. Size: {_settings.InitialSize}x{_settings.InitialSize}, Format: {_settings.Format}, Readable: {_settings.Readable}. Memory before: {System.GC.GetTotalMemory(false) / 1024 / 1024} MB");
 #endif
             
@@ -249,7 +249,7 @@ namespace RuntimeAtlasPacker
             packer.Initialize(_settings.InitialSize, _settings.InitialSize);
             _packers.Add(packer);
             
-#if UNITY_EDITOR || UNITY_IOS
+#if UNITY_EDITOR
             Debug.Log($"[RuntimeAtlas.CreateNewPage] Creating Texture2D object...");
 #endif
             
@@ -262,7 +262,7 @@ namespace RuntimeAtlasPacker
             // Clear texture based on UseRenderTextures setting
             if (_settings.UseRenderTextures)
             {
-#if UNITY_EDITOR || UNITY_IOS
+#if UNITY_EDITOR
                 Debug.Log($"[RuntimeAtlas.CreateNewPage] Clearing texture with RenderTexture (GPU-accelerated)...");
 #endif
                 // ✅ MEMORY OPTIMIZATION: Use RenderTexture to clear instead of allocating large Color32 array
@@ -280,7 +280,7 @@ namespace RuntimeAtlasPacker
                         
                         if (texture.isReadable)
                         {
-#if UNITY_EDITOR || UNITY_IOS
+#if UNITY_EDITOR
                             Debug.Log($"[RuntimeAtlas.CreateNewPage] Using ReadPixels for readable texture...");
 #endif
                             // For readable textures, use ReadPixels
@@ -291,7 +291,7 @@ namespace RuntimeAtlasPacker
                         }
                         else
                         {
-#if UNITY_EDITOR || UNITY_IOS
+#if UNITY_EDITOR
                             Debug.Log($"[RuntimeAtlas.CreateNewPage] Using Graphics.CopyTexture for non-readable texture...");
 #endif
                             // For non-readable textures, use Graphics.CopyTexture
@@ -300,7 +300,7 @@ namespace RuntimeAtlasPacker
                     }
                     catch (Exception ex)
                     {
-#if UNITY_EDITOR || UNITY_IOS
+#if UNITY_EDITOR
                         Debug.LogError($"[RuntimeAtlas.CreateNewPage] ✗ CRASH during RenderTexture clearing: {ex.Message}\nStack: {ex.StackTrace}");
 #endif
                         throw;
@@ -335,21 +335,20 @@ namespace RuntimeAtlasPacker
             _textures.Add(texture);
             _currentPageIndex = pageIndex;
             
-#if UNITY_EDITOR || UNITY_IOS
+#if UNITY_EDITOR
             Debug.Log($"[RuntimeAtlas.CreateNewPage] ✓ Page {pageIndex} created successfully. Total pages: {_textures.Count}, Memory after: {System.GC.GetTotalMemory(false) / 1024 / 1024} MB");
 #endif
 
 #if UNITY_IOS
-            // ✅ iOS MEMORY FIX: Force garbage collection after creating large texture
-            // iOS has strict memory limits - aggressively free unused memory
-            if (pageIndex > 0) // Only for pages after the first one
+            // ✅ iOS MEMORY SAFETY: Force GC after creating new page to prevent memory crashes
+            // Each new page can be 16-64MB - iOS needs aggressive memory management
+            if (pageIndex > 0) // Skip for first page to avoid startup overhead
             {
                 var memBefore = System.GC.GetTotalMemory(false) / 1024 / 1024;
                 System.GC.Collect();
                 System.GC.WaitForPendingFinalizers();
-                System.GC.Collect();
                 var memAfter = System.GC.GetTotalMemory(false) / 1024 / 1024;
-                Debug.Log($"[RuntimeAtlas.CreateNewPage] iOS: Forced GC. Memory: {memBefore}MB → {memAfter}MB (freed {memBefore - memAfter}MB)");
+                Debug.Log($"[RuntimeAtlas.CreateNewPage] iOS: Forced GC after creating page {pageIndex}. Memory: {memBefore}MB → {memAfter}MB (freed {memBefore - memAfter}MB)");
             }
 #endif
         }
@@ -1610,6 +1609,20 @@ namespace RuntimeAtlasPacker
                 return (AddResult.InvalidTexture, null);
             }
 
+#if UNITY_IOS
+            // ✅ iOS MEMORY SAFETY: Check memory before adding texture
+            // iOS has strict memory limits - prevent crashes by checking available memory
+            var memoryBeforeMB = System.GC.GetTotalMemory(false) / 1024 / 1024;
+            if (memoryBeforeMB > 500) // Threshold: 500MB
+            {
+                // Force GC to free up memory before proceeding
+                System.GC.Collect();
+                System.GC.WaitForPendingFinalizers();
+                var memoryAfterMB = System.GC.GetTotalMemory(false) / 1024 / 1024;
+                Debug.Log($"[RuntimeAtlas.AddInternal] iOS: High memory usage detected ({memoryBeforeMB}MB). Forced GC: {memoryBeforeMB}MB → {memoryAfterMB}MB");
+            }
+#endif
+
             var width = texture.width + _settings.Padding * 2;
             var height = texture.height + _settings.Padding * 2;
 
@@ -1713,6 +1726,15 @@ namespace RuntimeAtlasPacker
             
             _version++;
             _isDirty = true;
+
+#if UNITY_IOS
+            // ✅ iOS MEMORY SAFETY: Periodic cleanup after adding entries
+            // Prevent memory accumulation by cleaning up every 10 entries
+            if (_entries.Count % 10 == 0)
+            {
+                System.GC.Collect(0, GCCollectionMode.Optimized);
+            }
+#endif
 
             // Auto-repack if enabled
             if (_settings.RepackOnAdd)

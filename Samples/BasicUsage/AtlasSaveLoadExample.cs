@@ -48,7 +48,6 @@ namespace RuntimeAtlasPacker.Samples
         [SerializeField] private string _savePath = "SavedAtlas";
 
         private RuntimeAtlas _atlas;
-        private AtlasWebLoader _webLoader;
         private string _fullSavePath;
         private Transform _imageContainer;
         private Canvas _canvas;
@@ -616,8 +615,6 @@ namespace RuntimeAtlasPacker.Samples
         {
             _cts?.Cancel();
             _cts?.Dispose();
-            
-            _webLoader?.Dispose();
             
             if (_atlas != null)
             {

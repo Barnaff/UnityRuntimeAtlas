@@ -119,12 +119,27 @@ Shader ""Hidden/RuntimeAtlasPacker/Blit""
             RenderTexture prevActive = RenderTexture.active;
             
 #if UNITY_IOS
-            // ✅ iOS MEMORY WARNING: Check available memory before large allocation
-            var memBeforeMB = System.GC.GetTotalMemory(false) / 1024 / 1024;
+            // ✅ iOS MEMORY CRITICAL FIX: Force cleanup BEFORE allocating large RenderTexture
+            // RenderTextures use NATIVE (GPU) memory which is NOT tracked by GC.GetTotalMemory()
+            // iOS has strict limits on native memory - must aggressively clean up old RenderTextures
             var rtSizeMB = (target.width * target.height * 4) / 1024 / 1024; // RGBA32 size estimate
-            if (memBeforeMB > 100) // Warn if memory usage is high
+            
+            if (rtSizeMB > 16) // If allocating > 16MB RenderTexture
             {
-                Debug.LogWarning($"[TextureBlitter.BatchBlit] iOS: High memory usage ({memBeforeMB}MB) before allocating {rtSizeMB}MB RenderTexture. May cause OOM.");
+                // Force Unity to release all temporary RenderTextures from the pool
+                // This is CRITICAL on iOS to prevent native memory accumulation
+                var memBefore = System.GC.GetTotalMemory(false) / 1024 / 1024;
+                
+                // Clean up managed memory
+                System.GC.Collect();
+                System.GC.WaitForPendingFinalizers();
+                
+                // CRITICAL: Force Unity to clear RenderTexture pool
+                // This releases native GPU memory that GC can't see
+                RenderTexture.ReleaseTemporary(null); // null call forces pool cleanup
+                
+                var memAfter = System.GC.GetTotalMemory(false) / 1024 / 1024;
+                Debug.Log($"[TextureBlitter.BatchBlit] iOS: Cleaned up before allocating {rtSizeMB}MB RenderTexture. Managed memory: {memBefore}MB → {memAfter}MB");
             }
 #endif
             
