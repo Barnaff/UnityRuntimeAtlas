@@ -13,75 +13,29 @@ namespace RuntimeAtlasPacker
         private static Material _blitMaterial;
         private static bool _materialInitialized;
 
-        private static readonly string BlitShaderCode = @"
-Shader ""Hidden/RuntimeAtlasPacker/Blit""
-{
-    Properties
-    {
-        _MainTex (""Texture"", 2D) = ""white"" {}
-    }
-    SubShader
-    {
-        Tags { ""RenderType""=""Opaque"" }
-        LOD 100
-        Cull Off ZWrite Off ZTest Always
-        Blend One Zero
-
-        Pass
-        {
-            CGPROGRAM
-            #pragma vertex vert
-            #pragma fragment frag
-            #include ""UnityCG.cginc""
-
-            struct appdata
-            {
-                float4 vertex : POSITION;
-                float2 uv : TEXCOORD0;
-            };
-
-            struct v2f
-            {
-                float2 uv : TEXCOORD0;
-                float4 vertex : SV_POSITION;
-            };
-
-            sampler2D _MainTex;
-            float4 _MainTex_ST;
-
-            v2f vert (appdata v)
-            {
-                v2f o;
-                o.vertex = UnityObjectToClipPos(v.vertex);
-                o.uv = TRANSFORM_TEX(v.uv, _MainTex);
-                return o;
-            }
-
-            fixed4 frag (v2f i) : SV_Target
-            {
-                return tex2D(_MainTex, i.uv);
-            }
-            ENDCG
-        }
-    }
-}";
-
         private static void EnsureMaterial()
         {
             if (_materialInitialized) return;
             _materialInitialized = true;
 
-            var shader = Shader.Find("Hidden/RuntimeAtlasPacker/Blit");
-            if (shader == null)
-            {
-                // Fallback to standard blit shader
-                shader = Shader.Find("Hidden/BlitCopy");
-            }
+            // ✅ IMPROVED: Load pre-built material from Resources for build compatibility
+            _blitMaterial = Resources.Load<Material>("AtlasBlitMaterial");
             
-            if (shader != null)
+            if (_blitMaterial == null)
             {
-                _blitMaterial = new Material(shader);
-                _blitMaterial.hideFlags = HideFlags.HideAndDontSave;
+                // Fallback: Try to find the shader and create material
+                var shader = Shader.Find("Hidden/RuntimeAtlasPacker/Blit");
+                if (shader == null)
+                {
+                    // Last resort fallback to Unity's built-in blit shader
+                    shader = Shader.Find("Hidden/BlitCopy");
+                }
+                
+                if (shader != null)
+                {
+                    _blitMaterial = new Material(shader);
+                    _blitMaterial.hideFlags = HideFlags.HideAndDontSave;
+                }
             }
         }
 
