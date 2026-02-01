@@ -364,27 +364,10 @@ namespace RuntimeAtlasPacker
             Debug.Log($"[TextureBlitter.BlitWithMaterial] Target: {target.name}, Size: {target.width}x{target.height}, Format: {target.format}, Readable: {target.isReadable}");
             Debug.Log($"[TextureBlitter.BlitWithMaterial] Position: ({x}, {y})");
 
-#if UNITY_IOS
-            // ✅ iOS CRASH FIX: Use direct CPU pixel copy for readable textures to avoid Metal format conversion crash
-            // The crash occurs in RemapSIMDWithPermute during ARGB->RGBA conversion in Metal's deferred operations.
-            // By using CPU-based SetPixels, we completely bypass the GPU pipeline that causes the crash.
-            if (target.isReadable && source.isReadable)
-            {
-                Debug.Log($"[TextureBlitter.BlitWithMaterial] iOS: Using CPU-based pixel copy to avoid Metal format conversion crash...");
-                try
-                {
-                    BlitCPUDirect(source, target, x, y);
-                    Debug.Log($"[TextureBlitter.BlitWithMaterial] iOS: CPU pixel copy completed successfully");
-                    Debug.Log($"[TextureBlitter.BlitWithMaterial] ========== SINGLE BLIT END ==========");
-                    return;
-                }
-                catch (System.Exception cpuEx)
-                {
-                    Debug.LogWarning($"[TextureBlitter.BlitWithMaterial] iOS: CPU copy failed ({cpuEx.Message}), falling back to GPU method...");
-                    // Fall through to GPU method
-                }
-            }
-#endif
+            // ✅ iOS FIX: Always use GPU-based blit method
+            // CPU method causes crashes on large textures (4096x4096) due to massive array allocation (64MB)
+            // iOS IL2CPP has strict limits on array allocation size (~16-32MB)
+            // GPU method uses RenderTexture which doesn't have this limitation
 
             EnsureMaterial();
 
