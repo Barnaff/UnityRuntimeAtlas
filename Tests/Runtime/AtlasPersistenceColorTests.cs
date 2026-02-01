@@ -79,12 +79,8 @@ namespace RuntimeAtlasPacker.Tests
 
             var atlas = new RuntimeAtlas(settings);
             
-            // Replace the default texture with our test texture (using reflection)
-            var atlasType = typeof(RuntimeAtlas);
-            var texturesField = atlasType.GetField("_textures", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
-            var textures = texturesField.GetValue(atlas) as System.Collections.Generic.List<Texture2D>;
-            Object.DestroyImmediate(textures[0]); // Destroy default texture
-            textures[0] = texture;
+            // Replace the default texture with our test texture using public API
+            atlas.ReplaceTexturePage(0, texture);
 
             // Save the atlas
             var filePath = Path.Combine(_testDirectory, "test_colors");

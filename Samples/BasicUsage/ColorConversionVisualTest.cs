@@ -139,12 +139,8 @@ namespace RuntimeAtlasPacker.Samples
 
             var atlas = new RuntimeAtlas(settings);
             
-            // Replace default texture using reflection
-            var atlasType = typeof(RuntimeAtlas);
-            var texturesField = atlasType.GetField("_textures", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
-            var textures = texturesField.GetValue(atlas) as System.Collections.Generic.List<Texture2D>;
-            Object.Destroy(textures[0]);
-            textures[0] = texture;
+            // Replace default texture using public API
+            atlas.ReplaceTexturePage(0, texture);
 
             return atlas;
         }

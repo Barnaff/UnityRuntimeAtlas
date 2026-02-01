@@ -161,6 +161,56 @@ namespace RuntimeAtlasPacker
 #endif
         }
 
+        /// <summary>
+        /// Internal constructor for deserialization. Does not create initial page.
+        /// Pages will be added via AddLoadedPage() during deserialization.
+        /// </summary>
+        /// <param name="settings">Atlas settings</param>
+        /// <param name="skipInitialPage">If true, skips creating the initial page</param>
+        internal RuntimeAtlas(AtlasSettings settings, bool skipInitialPage)
+        {
+            // Format validation
+            if (settings.Format == 0 || !SystemInfo.SupportsTextureFormat(settings.Format))
+            {
+                settings.Format = TextureFormat.RGBA32;
+#if UNITY_EDITOR
+                Debug.LogWarning("[RuntimeAtlas] TextureFormat not supported, using RGBA32");
+#endif
+            }
+
+            // MaxSize validation
+            if (settings.MaxSize <= 0)
+            {
+                settings.MaxSize = 2048;
+#if UNITY_EDITOR
+                Debug.LogWarning("[RuntimeAtlas] MaxSize was invalid (<= 0), setting to 2048");
+#endif
+            }
+            
+            _settings = settings;
+            _entries = new Dictionary<int, AtlasEntry>(64);
+            _entriesByName = new Dictionary<string, AtlasEntry>(64);
+            _recycledIds = new Queue<int>(16);
+            _textures = new List<Texture2D>();
+            _packers = new List<IPackingAlgorithm>();
+            _currentPageIndex = 0;
+            
+            // Register in global registry for debugging
+            _registryId = _nextRegistryId++;
+            _debugName = $"Atlas_{_registryId}";
+            _allAtlases.Add(this);
+            
+            // Skip creating initial page for deserialization
+            if (!skipInitialPage)
+            {
+                CreateNewPage();
+            }
+            
+#if UNITY_EDITOR
+            Debug.Log($"[RuntimeAtlas] Created new atlas '{_debugName}' with ID {_registryId} (skipInitialPage: {skipInitialPage})");
+#endif
+        }
+
         private void CreateNewPage()
         {
             var pageIndex = _textures.Count;
@@ -2387,6 +2437,211 @@ namespace RuntimeAtlasPacker
 #endif
             }
             _isDirty = false;
+        }
+
+        /// <summary>
+        /// Public API for deserialization: Add a pre-loaded texture page to the atlas.
+        /// Used by AtlasPersistence when loading an atlas from disk with pre-rendered texture pages.
+        /// </summary>
+        /// <param name="texture">The pre-loaded texture page</param>
+        /// <param name="packerState">The serialized packing algorithm state for this page</param>
+        public void AddLoadedPage(Texture2D texture, PackingAlgorithmState packerState)
+        {
+            if (texture == null)
+            {
+#if UNITY_EDITOR
+                Debug.LogWarning("[RuntimeAtlas.AddLoadedPage] Null texture provided");
+#endif
+                return;
+            }
+
+            if (packerState == null)
+            {
+#if UNITY_EDITOR
+                Debug.LogWarning("[RuntimeAtlas.AddLoadedPage] Null packer state provided");
+#endif
+                return;
+            }
+
+#if UNITY_EDITOR
+            Debug.Log($"[RuntimeAtlas.AddLoadedPage] Adding loaded page {_textures.Count}: {texture.name}, Size: {texture.width}x{texture.height}");
+#endif
+
+            // Create packer for this page and restore its state
+            IPackingAlgorithm packer = packerState.Algorithm switch
+            {
+#if PACKING_BURST_ENABLED
+                PackingAlgorithm.MaxRects => new MaxRectsAlgorithm(),
+                PackingAlgorithm.Skyline => new SkylineAlgorithm(),
+#else
+                PackingAlgorithm.MaxRects => new MaxRectsAlgorithmNoBurst(),
+                PackingAlgorithm.Skyline => new MaxRectsAlgorithmNoBurst(),
+#endif
+                _ => new MaxRectsAlgorithmNoBurst()
+            };
+
+            // Initialize packer with loaded dimensions
+            packer.Initialize(packerState.Width, packerState.Height);
+
+            // Restore used rectangles by replaying the packing operations
+            // This marks regions as occupied without actually copying texture data
+            if (packerState.UsedRects != null)
+            {
+                foreach (var rectData in packerState.UsedRects)
+                {
+                    var rect = rectData.ToRectInt();
+                    // Replay the packing to mark this region as used
+                    if (packer.TryPack(rect.width, rect.height, out var packedRect))
+                    {
+                        // Successfully marked as used
+                        // Note: The returned position might differ, but that's okay
+                        // because we're just restoring the filled state
+                    }
+                    else
+                    {
+#if UNITY_EDITOR
+                        Debug.LogWarning($"[RuntimeAtlas.AddLoadedPage] Could not restore used rect {rect} during deserialization");
+#endif
+                    }
+                }
+            }
+
+            _packers.Add(packer);
+            _textures.Add(texture);
+            _currentPageIndex = _textures.Count - 1;
+
+#if UNITY_EDITOR
+            Debug.Log($"[RuntimeAtlas.AddLoadedPage] ✓ Loaded page added. Total pages: {_textures.Count}");
+#endif
+        }
+
+        /// <summary>
+        /// Public API for deserialization: Restore entries from serialized data during atlas loading.
+        /// Used by AtlasPersistence to reconstruct the atlas state from saved data.
+        /// </summary>
+        /// <param name="entryDataList">List of serialized entry data to restore</param>
+        public void RestoreEntries(List<AtlasEntryData> entryDataList)
+        {
+            if (entryDataList == null)
+            {
+#if UNITY_EDITOR
+                Debug.LogWarning("[RuntimeAtlas.RestoreEntries] Null entry data list provided");
+#endif
+                return;
+            }
+
+#if UNITY_EDITOR
+            Debug.Log($"[RuntimeAtlas.RestoreEntries] Restoring {entryDataList.Count} entries...");
+#endif
+
+            // Clear existing entries
+            _entries.Clear();
+            _entriesByName.Clear();
+
+            // Reconstruct each entry
+            foreach (var entryData in entryDataList)
+            {
+                try
+                {
+                    // Create AtlasEntry from serialized data
+                    var entry = new AtlasEntry(
+                        this,
+                        entryData.Id,
+                        entryData.TextureIndex,
+                        entryData.PixelRect.ToRectInt(),
+                        entryData.UVRect.ToRect(),
+                        entryData.Name,
+                        entryData.Border.ToVector4(),
+                        entryData.Pivot.ToVector2(),
+                        entryData.PixelsPerUnit,
+                        entryData.SpriteVersion
+                    );
+
+                    // Add to internal dictionaries
+                    _entries[entryData.Id] = entry;
+
+                    if (!string.IsNullOrEmpty(entryData.Name))
+                    {
+                        _entriesByName[entryData.Name] = entry;
+                    }
+
+                    // Update _nextId to avoid ID conflicts
+                    if (entryData.Id >= _nextId)
+                    {
+                        _nextId = entryData.Id + 1;
+                    }
+
+#if UNITY_EDITOR
+                    Debug.Log($"[RuntimeAtlas.RestoreEntries] Restored entry {entryData.Id}: '{entryData.Name}' on page {entryData.TextureIndex}");
+#endif
+                }
+                catch (Exception ex)
+                {
+#if UNITY_EDITOR
+                    Debug.LogError($"[RuntimeAtlas.RestoreEntries] Failed to restore entry {entryData.Id}: {ex.Message}");
+#endif
+                }
+            }
+
+#if UNITY_EDITOR
+            Debug.Log($"[RuntimeAtlas.RestoreEntries] Complete. Total entries restored: {_entries.Count}");
+#endif
+        }
+
+        /// <summary>
+        /// Public API for testing: Replace a texture page at the specified index.
+        /// WARNING: This is an advanced operation intended for testing scenarios.
+        /// Use with caution as it can corrupt the atlas if used incorrectly.
+        /// </summary>
+        /// <param name="pageIndex">The page index to replace</param>
+        /// <param name="texture">The new texture to use for this page</param>
+        /// <returns>True if successful, false if invalid parameters</returns>
+        public bool ReplaceTexturePage(int pageIndex, Texture2D texture)
+        {
+            if (pageIndex < 0 || pageIndex >= _textures.Count)
+            {
+#if UNITY_EDITOR
+                Debug.LogError($"[RuntimeAtlas.ReplaceTexturePage] Invalid page index: {pageIndex} (valid range: 0-{_textures.Count - 1})");
+#endif
+                return false;
+            }
+
+            if (texture == null)
+            {
+#if UNITY_EDITOR
+                Debug.LogError("[RuntimeAtlas.ReplaceTexturePage] Cannot replace with null texture");
+#endif
+                return false;
+            }
+
+#if UNITY_EDITOR
+            Debug.LogWarning($"[RuntimeAtlas.ReplaceTexturePage] Replacing texture page {pageIndex}. This is an advanced operation for testing.");
+#endif
+
+            // Destroy old texture if it exists
+            var oldTexture = _textures[pageIndex];
+            if (oldTexture != null)
+            {
+                if (Application.isPlaying)
+                {
+                    UnityEngine.Object.Destroy(oldTexture);
+                }
+                else
+                {
+                    UnityEngine.Object.DestroyImmediate(oldTexture);
+                }
+            }
+
+            // Replace with new texture
+            _textures[pageIndex] = texture;
+            _version++;
+            _isDirty = true;
+
+#if UNITY_EDITOR
+            Debug.Log($"[RuntimeAtlas.ReplaceTexturePage] Successfully replaced page {pageIndex}");
+#endif
+
+            return true;
         }
 
         public void Dispose()

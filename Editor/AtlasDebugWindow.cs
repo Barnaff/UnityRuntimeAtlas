@@ -245,7 +245,7 @@ namespace RuntimeAtlasPacker.Editor
             
             try
             {
-                // NEW: Get all atlases from global registry
+                // Get all atlases from global registry (RuntimeAtlas instances)
                 var allAtlases = RuntimeAtlas.GetAllAtlases();
                 if (allAtlases != null)
                 {
@@ -262,53 +262,26 @@ namespace RuntimeAtlasPacker.Editor
                     }
                 }
                 
-                // FALLBACK: Try to get atlases from AtlasPacker (for backwards compatibility)
-                var type = typeof(AtlasPacker);
-                
-                // Get default atlas
-                var defaultField = type.GetField("_defaultAtlas", BindingFlags.NonPublic | BindingFlags.Static);
-                if (defaultField != null)
+                // Get atlases from AtlasPacker using public API (no reflection needed)
+                var managedAtlases = AtlasPacker.GetAllManagedAtlases();
+                if (managedAtlases != null)
                 {
-                    var defaultAtlas = defaultField.GetValue(null) as RuntimeAtlas;
-                    if (defaultAtlas != null && !result.ContainsValue(defaultAtlas))
+                    Debug.Log($"[AtlasDebugWindow] Found {managedAtlases.Count} managed atlases from AtlasPacker");
+                    foreach (var kvp in managedAtlases)
                     {
-                        result["[Default AtlasPacker]"] = defaultAtlas;
-                        Debug.Log($"[AtlasDebugWindow] Found default AtlasPacker atlas");
-                    }
-                }
-                
-                // Get named atlases
-                var namedField = type.GetField("_namedAtlases", BindingFlags.NonPublic | BindingFlags.Static);
-                if (namedField != null)
-                {
-                    var namedAtlases = namedField.GetValue(null) as Dictionary<string, RuntimeAtlas>;
-                    if (namedAtlases != null)
-                    {
-                        Debug.Log($"[AtlasDebugWindow] Found {namedAtlases.Count} named AtlasPacker atlases");
-                        foreach (var kvp in namedAtlases)
+                        if (kvp.Value != null && !result.ContainsValue(kvp.Value))
                         {
-                            if (kvp.Value != null && !result.ContainsValue(kvp.Value))
-                            {
-                                result[kvp.Key] = kvp.Value;
-                                Debug.Log($"[AtlasDebugWindow] Found named AtlasPacker atlas '{kvp.Key}'");
-                            }
+                            result[kvp.Key] = kvp.Value;
+                            Debug.Log($"[AtlasDebugWindow] Found managed atlas '{kvp.Key}'");
                         }
                     }
-                    else
-                    {
-                        Debug.Log("[AtlasDebugWindow] Named atlases field found but value is null");
-                    }
-                }
-                else
-                {
-                    Debug.LogWarning("[AtlasDebugWindow] Could not find _namedAtlases field");
                 }
                 
                 Debug.Log($"[AtlasDebugWindow] Total atlases found: {result.Count}");
             }
             catch (Exception e)
             {
-                Debug.LogError($"[AtlasDebugWindow] Failed to get atlases via reflection: {e.Message}\n{e.StackTrace}");
+                Debug.LogError($"[AtlasDebugWindow] Failed to get atlases: {e.Message}\n{e.StackTrace}");
             }
             
             return result;

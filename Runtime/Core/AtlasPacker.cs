@@ -545,6 +545,36 @@ namespace RuntimeAtlasPacker
         }
 
         /// <summary>
+        /// Public API for debugging/tools: Get all managed atlases with their names.
+        /// Includes the default atlas (if initialized) and all named atlases.
+        /// </summary>
+        /// <returns>Dictionary mapping atlas names to RuntimeAtlas instances</returns>
+        public static Dictionary<string, RuntimeAtlas> GetAllManagedAtlases()
+        {
+            lock (_lock)
+            {
+                var result = new Dictionary<string, RuntimeAtlas>();
+                
+                // Add default atlas if it exists
+                if (_defaultAtlas != null)
+                {
+                    result["[Default AtlasPacker]"] = _defaultAtlas;
+                }
+                
+                // Add all named atlases
+                foreach (var kvp in _namedAtlases)
+                {
+                    if (kvp.Value != null)
+                    {
+                        result[kvp.Key] = kvp.Value;
+                    }
+                }
+                
+                return result;
+            }
+        }
+
+        /// <summary>
         /// Pack multiple textures with progress callback and frame spreading.
         /// Use this for large batches to avoid frame drops.
         /// Returns successfully packed entries via callback.

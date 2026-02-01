@@ -804,7 +804,7 @@ namespace RuntimeAtlasPacker
 
         /// <summary>
         /// Deserialize atlas data into a runtime atlas.
-        /// Fast path - creates textures and adds entries directly without reflection.
+        /// Creates textures and adds entries using the public deserialization API.
         /// </summary>
         private static RuntimeAtlas DeserializeAtlas(AtlasSerializationData data, string baseFilePath)
         {
@@ -825,7 +825,9 @@ namespace RuntimeAtlasPacker
             }
 #endif
             
-            var atlas = new RuntimeAtlas(settings);
+            // Use internal constructor that skips creating the initial page
+            // Pages will be added via AddLoadedPage() from the saved PNG files
+            var atlas = new RuntimeAtlas(settings, skipInitialPage: true);
             var loadedTextures = new List<Texture2D>();
 
             try
@@ -950,11 +952,11 @@ namespace RuntimeAtlasPacker
                     Debug.Log($"[AtlasPersistence] ✓ Loaded page {i}: {texture.name}, Size: {texture.width}x{texture.height}, Readable: {texture.isReadable}, Format: {texture.format}");
 #endif
 
-                    // Add loaded page to atlas using reflection (only once per page)
+                    // Add loaded page to atlas using public API
                     AddLoadedPageToAtlas(atlas, texture, pageData.PackerState);
                 }
 
-                // Reconstruct entries using reflection (necessary for internal constructor)
+                // Reconstruct entries using public API
                 RestoreAtlasEntries(atlas, data);
 
 #if UNITY_EDITOR
@@ -991,7 +993,7 @@ namespace RuntimeAtlasPacker
 
         /// <summary>
         /// Deserialize atlas data into a runtime atlas.
-        /// Fast path - creates textures and adds entries directly without reflection.
+        /// Creates textures and adds entries using the public deserialization API.
         /// </summary>
         private static RuntimeAtlas DeserializeAtlasFromData(AtlasSerializationData data, List<(int index, byte[] pngData)> pngDataList)
         {
@@ -1012,7 +1014,9 @@ namespace RuntimeAtlasPacker
             }
 #endif
             
-            var atlas = new RuntimeAtlas(settings);
+            // Use internal constructor that skips creating the initial page
+            // Pages will be added via AddLoadedPage() from the saved PNG files
+            var atlas = new RuntimeAtlas(settings, skipInitialPage: true);
             var loadedTextures = new List<Texture2D>();
 
             try
@@ -1134,11 +1138,11 @@ namespace RuntimeAtlasPacker
                     Debug.Log($"[AtlasPersistence] ✓ Loaded page {i}: {texture.name}, Size: {texture.width}x{texture.height}, Readable: {texture.isReadable}, Format: {texture.format}");
 #endif
 
-                    // Add loaded page to atlas using reflection (only once per page)
+                    // Add loaded page to atlas using public API
                     AddLoadedPageToAtlas(atlas, texture, pageData.PackerState);
                 }
 
-                // Reconstruct entries using reflection (necessary for internal constructor)
+                // Reconstruct entries using public API
                 RestoreAtlasEntries(atlas, data);
 
 #if UNITY_EDITOR
@@ -1174,25 +1178,20 @@ namespace RuntimeAtlasPacker
         }
 
         /// <summary>
-        /// Add a loaded page texture to the atlas (reflection-based).
+        /// Add a loaded page texture to the atlas using the public deserialization API.
         /// This is used during deserialization to add pre-loaded textures to the atlas.
         /// </summary>
         private static void AddLoadedPageToAtlas(RuntimeAtlas atlas, Texture2D texture, PackingAlgorithmState packerState)
         {
-            // Use reflection to access the internal method for adding pages
-            var method = typeof(RuntimeAtlas).GetMethod("AddPage", System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic);
-            method?.Invoke(atlas, new object[] { texture, packerState });
+            atlas.AddLoadedPage(texture, packerState);
         }
 
         /// <summary>
-        /// Restore atlas entries after deserialization (reflection-based).
-        /// This is necessary because the internal constructor of RuntimeAtlas does not initialize entries.
+        /// Restore atlas entries after deserialization using the public deserialization API.
         /// </summary>
         private static void RestoreAtlasEntries(RuntimeAtlas atlas, AtlasSerializationData data)
         {
-            // Use reflection to access the internal method for restoring entries
-            var method = typeof(RuntimeAtlas).GetMethod("RestoreEntries", System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic);
-            method?.Invoke(atlas, new object[] { data.Entries });
+            atlas.RestoreEntries(data.Entries);
         }
     }
 }
