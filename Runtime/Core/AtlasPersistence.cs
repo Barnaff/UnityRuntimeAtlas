@@ -77,6 +77,15 @@ namespace RuntimeAtlasPacker
                             Directory.CreateDirectory(directory);
                         }
 
+                        // ✅ iOS CRITICAL FIX: Force GPU to complete all pending texture operations
+                        // Before reading texture data (for EncodeToPNG), we must ensure all pending
+                        // GPU uploads are complete. Otherwise we may read corrupted/partial data.
+#if UNITY_IOS
+                        Debug.Log($"[AtlasPersistence] iOS: Forcing GPU flush before reading textures...");
+                        GL.Flush();
+                        Debug.Log($"[AtlasPersistence] iOS: GPU flush complete");
+#endif
+
                         // Save each page as PNG
                         for (var i = 0; i < atlas.PageCount; i++)
                         {
@@ -117,6 +126,11 @@ namespace RuntimeAtlasPacker
                                     Texture2D tempTexture = new Texture2D(texture.width, texture.height, TextureFormat.ARGB32, false);
                                     tempTexture.ReadPixels(new Rect(0, 0, rt.width, rt.height), 0, 0);
                                     tempTexture.Apply();
+
+#if UNITY_IOS
+                                    // ✅ iOS FIX: Ensure texture data is fully available before encoding
+                                    GL.Flush();
+#endif
 
                                     // Encode to PNG
                                     pngData = tempTexture.EncodeToPNG();
