@@ -351,6 +351,28 @@ namespace RuntimeAtlasPacker
             Debug.Log($"[TextureBlitter.BlitWithMaterial] Target: {target.name}, Size: {target.width}x{target.height}, Format: {target.format}, Readable: {target.isReadable}");
             Debug.Log($"[TextureBlitter.BlitWithMaterial] Position: ({x}, {y})");
 
+#if UNITY_IOS
+            // ✅ iOS CRASH FIX: Use direct CPU pixel copy for readable textures to avoid Metal format conversion crash
+            // The crash occurs in RemapSIMDWithPermute during ARGB->RGBA conversion in Metal's deferred operations.
+            // By using CPU-based SetPixels, we completely bypass the GPU pipeline that causes the crash.
+            if (target.isReadable && source.isReadable)
+            {
+                Debug.Log($"[TextureBlitter.BlitWithMaterial] iOS: Using CPU-based pixel copy to avoid Metal format conversion crash...");
+                try
+                {
+                    BlitCPUDirect(source, target, x, y);
+                    Debug.Log($"[TextureBlitter.BlitWithMaterial] iOS: CPU pixel copy completed successfully");
+                    Debug.Log($"[TextureBlitter.BlitWithMaterial] ========== SINGLE BLIT END ==========");
+                    return;
+                }
+                catch (System.Exception cpuEx)
+                {
+                    Debug.LogWarning($"[TextureBlitter.BlitWithMaterial] iOS: CPU copy failed ({cpuEx.Message}), falling back to GPU method...");
+                    // Fall through to GPU method
+                }
+            }
+#endif
+
             EnsureMaterial();
 
             RenderTexture rt = null;
@@ -583,7 +605,28 @@ namespace RuntimeAtlasPacker
         }
 
         /// <summary>
+        /// Direct CPU-based pixel copy using SetPixels (not SetPixels32).
+        /// This avoids the Metal format conversion that causes crashes on iOS.
+        /// More memory efficient than BlitCPU as it only copies the source region.
+        /// </summary>
+        private static void BlitCPUDirect(Texture2D source, Texture2D target, int x, int y)
+        {
+            // Get only the source pixels (small texture, e.g., 256x256)
+            var sourcePixels = source.GetPixels();
+
+            // Set pixels directly at the target location
+            // This uses the block-copy variant which is more efficient
+            target.SetPixels(x, y, source.width, source.height, sourcePixels);
+
+            // Apply changes - this uploads to GPU
+            // Using updateMipmaps=false and makeNoLongerReadable=false
+            target.Apply(false, false);
+        }
+
+        /// <summary>
         /// CPU-based texture blit (fallback when GPU is not available).
+        /// WARNING: This allocates large arrays for both source and target textures.
+        /// Use BlitCPUDirect instead for better memory efficiency.
         /// </summary>
         public static void BlitCPU(Texture2D source, Texture2D target, int x, int y)
         {
