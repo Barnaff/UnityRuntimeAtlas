@@ -223,18 +223,37 @@ namespace RuntimeAtlasPacker
                 RenderTexture.active = null;
 
                 Debug.Log($"[TextureBlitter.BatchBlit] STEP 4 COMPLETE: All sprites drawn to RenderTexture");
-                
-                // ✅ iOS CRITICAL FIX: Avoid ReadPixels on large textures (causes OOM crash)
+
+                // ✅ iOS CRITICAL FIX: Use ReadPixels for readable textures to handle format conversion safely
                 Debug.Log($"[TextureBlitter.BatchBlit] STEP 5: Copying RT back to target texture...");
                 Debug.Log($"[TextureBlitter.BatchBlit] RT Info - Width: {rt.width}, Height: {rt.height}, Format: {rt.format}, IsCreated: {rt.IsCreated()}");
 
 #if UNITY_IOS
-                // On iOS, large ReadPixels operations can crash due to memory pressure
-                // Use GPU-only CopyTexture for textures >= 2048 pixels
-                bool useGPUOnly = target.width >= 2048 || target.height >= 2048;
+                // ✅ iOS CRITICAL FIX: Format compatibility check for CopyTexture
+                // Graphics.CopyTexture REQUIRES compatible formats between source and destination.
+                // RenderTexture uses ARGB32 but atlas textures use RGBA32 - these are INCOMPATIBLE!
+                // On iOS Metal, format mismatch causes DEFERRED crash in BlitterRemap during sprite access.
+                //
+                // SOLUTION: For READABLE textures, always use ReadPixels (handles format conversion safely).
+                // Only use CopyTexture for NON-READABLE textures where ReadPixels can't work.
+
+                // Check if formats are compatible for CopyTexture
+                bool batchFormatsCompatible = (rt.format == RenderTextureFormat.ARGB32 && target.format == TextureFormat.ARGB32) ||
+                                              (rt.format == RenderTextureFormat.BGRA32 && target.format == TextureFormat.BGRA32);
+
+                // Only use GPU-only path for NON-READABLE textures (where ReadPixels won't work)
+                // For READABLE textures, always use ReadPixels to safely handle format conversion
+                bool useGPUOnly = !target.isReadable && (target.width >= 2048 || target.height >= 2048);
                 if (useGPUOnly)
                 {
-                    Debug.Log($"[TextureBlitter.BatchBlit] iOS: Large texture detected ({target.width}x{target.height}), using GPU-only CopyTexture...");
+                    Debug.Log($"[TextureBlitter.BatchBlit] iOS: Non-readable large texture ({target.width}x{target.height}), must use CopyTexture...");
+                    Debug.Log($"[TextureBlitter.BatchBlit] iOS: RT format: {rt.format}, Target format: {target.format}, Formats compatible: {batchFormatsCompatible}");
+
+                    if (!batchFormatsCompatible)
+                    {
+                        Debug.LogWarning($"[TextureBlitter.BatchBlit] iOS: FORMAT MISMATCH WARNING - RT:{rt.format} vs Target:{target.format}. This may cause issues!");
+                    }
+
                     Debug.Log($"[TextureBlitter.BatchBlit] >>> ABOUT TO CALL Graphics.CopyTexture <<<");
 
                     try
@@ -246,13 +265,13 @@ namespace RuntimeAtlasPacker
                         // ✅ iOS CRITICAL: Multiple synchronization steps to ensure GPU operations complete
                         Debug.Log($"[TextureBlitter.BatchBlit] iOS: Forcing GPU flush...");
                         GL.Flush();
-                        
+
                         Debug.Log($"[TextureBlitter.BatchBlit] iOS: Forcing GPU finish...");
                         GL.Finish();
-                        
+
                         Debug.Log($"[TextureBlitter.BatchBlit] iOS: Ensuring GPU sync...");
                         GL.IssuePluginEvent(0);
-                        
+
                         Debug.Log($"[TextureBlitter.BatchBlit] iOS: GPU synchronization complete");
                     }
                     catch (System.Exception copyEx)
@@ -265,6 +284,12 @@ namespace RuntimeAtlasPacker
                     MemoryDiagnostics.LogMemoryState("BatchBlit END");
                     Debug.Log($"[TextureBlitter.BatchBlit] ========== BATCH BLIT END ==========");
                     return; // Skip ReadPixels path
+                }
+
+                // For readable textures on iOS, log that we're using the safe ReadPixels path
+                if (target.isReadable && (target.width >= 2048 || target.height >= 2048))
+                {
+                    Debug.Log($"[TextureBlitter.BatchBlit] iOS: Large READABLE texture ({target.width}x{target.height}), using ReadPixels (safe format conversion)...");
                 }
 #endif
 
@@ -488,16 +513,34 @@ namespace RuntimeAtlasPacker
                 // ✅ CRITICAL FIX: Different approach for readable vs non-readable textures
                 Debug.Log($"[TextureBlitter.BlitWithMaterial] Copying RT back to target...");
 
-                // ✅ iOS CRITICAL FIX: Avoid ReadPixels on large textures (causes OOM crash)
-                // ReadPixels internally allocates buffers proportional to texture size
-                // For 4096x4096, this can cause iOS to crash due to memory pressure
-                // Use GPU-only CopyTexture instead which has no memory allocation issues
-                
+                // ✅ iOS CRITICAL FIX: Format compatibility check for CopyTexture
+                // Graphics.CopyTexture REQUIRES compatible formats between source and destination.
+                // RenderTexture uses ARGB32 but atlas textures use RGBA32 - these are INCOMPATIBLE!
+                // ARGB32 = [Alpha][Red][Green][Blue], RGBA32 = [Red][Green][Blue][Alpha]
+                // On iOS Metal, format mismatch causes DEFERRED crash in BlitterRemap during sprite access.
+                //
+                // SOLUTION: For READABLE textures, always use ReadPixels (handles format conversion safely).
+                // Only use CopyTexture for NON-READABLE textures where ReadPixels can't work.
+
 #if UNITY_IOS
-                bool useGPUOnly = target.width >= 2048 || target.height >= 2048;
+                // Check if formats are compatible for CopyTexture
+                // RenderTextureFormat.ARGB32 is NOT compatible with TextureFormat.RGBA32
+                bool formatsCompatible = (rt.format == RenderTextureFormat.ARGB32 && target.format == TextureFormat.ARGB32) ||
+                                         (rt.format == RenderTextureFormat.BGRA32 && target.format == TextureFormat.BGRA32);
+
+                // Only use GPU-only path for NON-READABLE textures (where ReadPixels won't work)
+                // For READABLE textures, always use ReadPixels to safely handle format conversion
+                bool useGPUOnly = !target.isReadable && (target.width >= 2048 || target.height >= 2048);
                 if (useGPUOnly)
                 {
-                    Debug.Log($"[TextureBlitter.BlitWithMaterial] iOS: Large texture detected ({target.width}x{target.height}), using GPU-only CopyTexture...");
+                    Debug.Log($"[TextureBlitter.BlitWithMaterial] iOS: Non-readable large texture ({target.width}x{target.height}), must use CopyTexture...");
+                    Debug.Log($"[TextureBlitter.BlitWithMaterial] iOS: RT format: {rt.format}, Target format: {target.format}, Formats compatible: {formatsCompatible}");
+
+                    if (!formatsCompatible)
+                    {
+                        Debug.LogWarning($"[TextureBlitter.BlitWithMaterial] iOS: FORMAT MISMATCH WARNING - RT:{rt.format} vs Target:{target.format}. This may cause issues!");
+                    }
+
                     Debug.Log($"[TextureBlitter.BlitWithMaterial] >>> ABOUT TO CALL Graphics.CopyTexture <<<");
 
                     try
@@ -508,19 +551,19 @@ namespace RuntimeAtlasPacker
 
                         // ✅ iOS CRITICAL: Multiple synchronization steps to ensure GPU operations complete
                         // Graphics.CopyTexture is asynchronous on Metal - must force complete synchronization
-                        
+
                         // Step 1: Flush all pending GPU commands
                         Debug.Log($"[TextureBlitter.BlitWithMaterial] iOS: Forcing GPU flush...");
                         GL.Flush();
-                        
+
                         // Step 2: Force GPU to finish all commands (stronger than Flush)
                         Debug.Log($"[TextureBlitter.BlitWithMaterial] iOS: Forcing GPU finish...");
                         GL.Finish();
-                        
+
                         // Step 3: Touch the texture to ensure it's uploaded and accessible
                         Debug.Log($"[TextureBlitter.BlitWithMaterial] iOS: Ensuring texture is GPU-resident...");
                         GL.IssuePluginEvent(0); // Force GPU sync point
-                        
+
                         Debug.Log($"[TextureBlitter.BlitWithMaterial] iOS: GPU synchronization complete");
                     }
                     catch (System.Exception copyEx)
@@ -528,9 +571,15 @@ namespace RuntimeAtlasPacker
                         Debug.LogError($"[TextureBlitter.BlitWithMaterial] ✗ Graphics.CopyTexture FAILED: {copyEx.Message}\n{copyEx.StackTrace}");
                         throw;
                     }
-                    
+
                     Debug.Log($"[TextureBlitter.BlitWithMaterial] ========== SINGLE BLIT END ==========");
                     return; // Skip ReadPixels path
+                }
+
+                // For readable textures on iOS, log that we're using the safe ReadPixels path
+                if (target.isReadable && (target.width >= 2048 || target.height >= 2048))
+                {
+                    Debug.Log($"[TextureBlitter.BlitWithMaterial] iOS: Large READABLE texture ({target.width}x{target.height}), using ReadPixels (safe format conversion)...");
                 }
 #endif
 
