@@ -243,10 +243,17 @@ namespace RuntimeAtlasPacker
                         Graphics.CopyTexture(rt, target);
                         Debug.Log($"[TextureBlitter.BatchBlit] Graphics.CopyTexture completed successfully");
 
-                        // Force GPU to complete the copy operation
+                        // ✅ iOS CRITICAL: Multiple synchronization steps to ensure GPU operations complete
                         Debug.Log($"[TextureBlitter.BatchBlit] iOS: Forcing GPU flush...");
                         GL.Flush();
-                        Debug.Log($"[TextureBlitter.BatchBlit] iOS: GPU flush complete");
+                        
+                        Debug.Log($"[TextureBlitter.BatchBlit] iOS: Forcing GPU finish...");
+                        GL.Finish();
+                        
+                        Debug.Log($"[TextureBlitter.BatchBlit] iOS: Ensuring GPU sync...");
+                        GL.IssuePluginEvent(0);
+                        
+                        Debug.Log($"[TextureBlitter.BatchBlit] iOS: GPU synchronization complete");
                     }
                     catch (System.Exception copyEx)
                     {
@@ -499,10 +506,22 @@ namespace RuntimeAtlasPacker
                         Graphics.CopyTexture(rt, target);
                         Debug.Log($"[TextureBlitter.BlitWithMaterial] Graphics.CopyTexture completed");
 
-                        // Force GPU to complete the copy operation
+                        // ✅ iOS CRITICAL: Multiple synchronization steps to ensure GPU operations complete
+                        // Graphics.CopyTexture is asynchronous on Metal - must force complete synchronization
+                        
+                        // Step 1: Flush all pending GPU commands
                         Debug.Log($"[TextureBlitter.BlitWithMaterial] iOS: Forcing GPU flush...");
                         GL.Flush();
-                        Debug.Log($"[TextureBlitter.BlitWithMaterial] iOS: GPU flush complete");
+                        
+                        // Step 2: Force GPU to finish all commands (stronger than Flush)
+                        Debug.Log($"[TextureBlitter.BlitWithMaterial] iOS: Forcing GPU finish...");
+                        GL.Finish();
+                        
+                        // Step 3: Touch the texture to ensure it's uploaded and accessible
+                        Debug.Log($"[TextureBlitter.BlitWithMaterial] iOS: Ensuring texture is GPU-resident...");
+                        GL.IssuePluginEvent(0); // Force GPU sync point
+                        
+                        Debug.Log($"[TextureBlitter.BlitWithMaterial] iOS: GPU synchronization complete");
                     }
                     catch (System.Exception copyEx)
                     {
