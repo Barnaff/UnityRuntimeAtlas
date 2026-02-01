@@ -350,7 +350,31 @@ namespace RuntimeAtlasPacker
                     {
                         downloadedTexture = DownloadHandlerTexture.GetContent(request);
                         downloadedTexture.name = name;
-                        
+
+#if UNITY_IOS
+                        // ✅ iOS CRITICAL FIX: Convert ARGB32 to RGBA32 to avoid Metal SIMD crash
+                        // DownloadHandlerTexture may return ARGB32 textures for PNG images
+                        // Metal's RemapSIMDWithPermute crashes when converting ARGB->RGBA during Apply()
+                        if (downloadedTexture.format == TextureFormat.ARGB32)
+                        {
+                            Debug.Log($"[AtlasWebLoader] iOS: Converting downloaded texture '{name}' from ARGB32 to RGBA32...");
+
+                            var pixels = downloadedTexture.GetPixels32();
+                            var rgbaTexture = new Texture2D(downloadedTexture.width, downloadedTexture.height, TextureFormat.RGBA32, false);
+                            rgbaTexture.name = name;
+                            rgbaTexture.filterMode = downloadedTexture.filterMode;
+                            rgbaTexture.wrapMode = downloadedTexture.wrapMode;
+                            rgbaTexture.SetPixels32(pixels);
+                            rgbaTexture.Apply(false, false);
+
+                            // Destroy old texture and use converted one
+                            UnityEngine.Object.Destroy(downloadedTexture);
+                            downloadedTexture = rgbaTexture;
+
+                            Debug.Log($"[AtlasWebLoader] iOS: Conversion complete. New format: {downloadedTexture.format}");
+                        }
+#endif
+
                         // Return texture - caller is responsible for cleanup
                         var result = (name, downloadedTexture);
                         downloadedTexture = null; // Transfer ownership to caller
@@ -407,6 +431,30 @@ namespace RuntimeAtlasPacker
                     {
                         downloadedTexture = DownloadHandlerTexture.GetContent(webRequest);
                         downloadedTexture.name = request.SpriteName;
+
+#if UNITY_IOS
+                        // ✅ iOS CRITICAL FIX: Convert ARGB32 to RGBA32 to avoid Metal SIMD crash
+                        // DownloadHandlerTexture may return ARGB32 textures for PNG images
+                        // Metal's RemapSIMDWithPermute crashes when converting ARGB->RGBA during Apply()
+                        if (downloadedTexture.format == TextureFormat.ARGB32)
+                        {
+                            Debug.Log($"[AtlasWebLoader] iOS: Converting downloaded texture '{request.SpriteName}' from ARGB32 to RGBA32...");
+
+                            var pixels = downloadedTexture.GetPixels32();
+                            var rgbaTexture = new Texture2D(downloadedTexture.width, downloadedTexture.height, TextureFormat.RGBA32, false);
+                            rgbaTexture.name = request.SpriteName;
+                            rgbaTexture.filterMode = downloadedTexture.filterMode;
+                            rgbaTexture.wrapMode = downloadedTexture.wrapMode;
+                            rgbaTexture.SetPixels32(pixels);
+                            rgbaTexture.Apply(false, false);
+
+                            // Destroy old texture and use converted one
+                            UnityEngine.Object.Destroy(downloadedTexture);
+                            downloadedTexture = rgbaTexture;
+
+                            Debug.Log($"[AtlasWebLoader] iOS: Conversion complete. New format: {downloadedTexture.format}");
+                        }
+#endif
 
                         // Add to atlas
                         var (result, entry) = _atlas.Add(request.SpriteName, downloadedTexture);
