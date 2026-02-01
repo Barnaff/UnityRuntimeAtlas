@@ -224,10 +224,44 @@ namespace RuntimeAtlasPacker
 
                 Debug.Log($"[TextureBlitter.BatchBlit] STEP 4 COMPLETE: All sprites drawn to RenderTexture");
                 
-                // ✅ CRITICAL FIX: Different approach for readable vs non-readable textures
+                // ✅ iOS CRITICAL FIX: Avoid ReadPixels on large textures (causes OOM crash)
                 Debug.Log($"[TextureBlitter.BatchBlit] STEP 5: Copying RT back to target texture...");
                 Debug.Log($"[TextureBlitter.BatchBlit] RT Info - Width: {rt.width}, Height: {rt.height}, Format: {rt.format}, IsCreated: {rt.IsCreated()}");
 
+#if UNITY_IOS
+                // On iOS, large ReadPixels operations can crash due to memory pressure
+                // Use GPU-only CopyTexture for textures >= 2048 pixels
+                bool useGPUOnly = target.width >= 2048 || target.height >= 2048;
+                if (useGPUOnly)
+                {
+                    Debug.Log($"[TextureBlitter.BatchBlit] iOS: Large texture detected ({target.width}x{target.height}), using GPU-only CopyTexture...");
+                    Debug.Log($"[TextureBlitter.BatchBlit] >>> ABOUT TO CALL Graphics.CopyTexture <<<");
+
+                    try
+                    {
+                        // GPU-only copy - no CPU memory allocation
+                        Graphics.CopyTexture(rt, target);
+                        Debug.Log($"[TextureBlitter.BatchBlit] Graphics.CopyTexture completed successfully");
+
+                        // Force GPU to complete the copy operation
+                        Debug.Log($"[TextureBlitter.BatchBlit] iOS: Forcing GPU flush...");
+                        GL.Flush();
+                        Debug.Log($"[TextureBlitter.BatchBlit] iOS: GPU flush complete");
+                    }
+                    catch (System.Exception copyEx)
+                    {
+                        Debug.LogError($"[TextureBlitter.BatchBlit] ✗ Graphics.CopyTexture FAILED: {copyEx.Message}\n{copyEx.StackTrace}");
+                        throw;
+                    }
+
+                    Debug.Log($"[TextureBlitter.BatchBlit] ✓ BATCH BLIT COMPLETE");
+                    MemoryDiagnostics.LogMemoryState("BatchBlit END");
+                    Debug.Log($"[TextureBlitter.BatchBlit] ========== BATCH BLIT END ==========");
+                    return; // Skip ReadPixels path
+                }
+#endif
+
+                // For smaller textures or non-iOS, use appropriate method based on readability
                 if (target.isReadable)
                 {
                     Debug.Log($"[TextureBlitter.BatchBlit] STEP 5a: Using ReadPixels (readable texture)...");
@@ -447,6 +481,41 @@ namespace RuntimeAtlasPacker
                 // ✅ CRITICAL FIX: Different approach for readable vs non-readable textures
                 Debug.Log($"[TextureBlitter.BlitWithMaterial] Copying RT back to target...");
 
+                // ✅ iOS CRITICAL FIX: Avoid ReadPixels on large textures (causes OOM crash)
+                // ReadPixels internally allocates buffers proportional to texture size
+                // For 4096x4096, this can cause iOS to crash due to memory pressure
+                // Use GPU-only CopyTexture instead which has no memory allocation issues
+                
+#if UNITY_IOS
+                bool useGPUOnly = target.width >= 2048 || target.height >= 2048;
+                if (useGPUOnly)
+                {
+                    Debug.Log($"[TextureBlitter.BlitWithMaterial] iOS: Large texture detected ({target.width}x{target.height}), using GPU-only CopyTexture...");
+                    Debug.Log($"[TextureBlitter.BlitWithMaterial] >>> ABOUT TO CALL Graphics.CopyTexture <<<");
+
+                    try
+                    {
+                        // GPU-only copy - no CPU memory allocation
+                        Graphics.CopyTexture(rt, target);
+                        Debug.Log($"[TextureBlitter.BlitWithMaterial] Graphics.CopyTexture completed");
+
+                        // Force GPU to complete the copy operation
+                        Debug.Log($"[TextureBlitter.BlitWithMaterial] iOS: Forcing GPU flush...");
+                        GL.Flush();
+                        Debug.Log($"[TextureBlitter.BlitWithMaterial] iOS: GPU flush complete");
+                    }
+                    catch (System.Exception copyEx)
+                    {
+                        Debug.LogError($"[TextureBlitter.BlitWithMaterial] ✗ Graphics.CopyTexture FAILED: {copyEx.Message}\n{copyEx.StackTrace}");
+                        throw;
+                    }
+                    
+                    Debug.Log($"[TextureBlitter.BlitWithMaterial] ========== SINGLE BLIT END ==========");
+                    return; // Skip ReadPixels path
+                }
+#endif
+
+                // For smaller textures or non-iOS, use ReadPixels (safer for readable textures)
                 if (target.isReadable)
                 {
                     Debug.Log($"[TextureBlitter.BlitWithMaterial] Using ReadPixels (readable texture)...");
