@@ -881,26 +881,67 @@ namespace RuntimeAtlasPacker
                     }
 #endif
 
+                    // Create texture from PNG data
+                    // ✅ CRITICAL FIX: Create as READABLE 
+                    // The 3rd parameter (mipChain) determines if mipmaps are generated
+                    // We do NOT pass a 5th parameter - Unity will create a readable texture by default
+                    // ✅ PLATFORM FIX: Always use RGBA32 when loading from PNG to avoid SIMD conversion issues
+                    // PNG files are naturally RGBA format, using RGBA32 prevents format conversion issues
+                    // This prevents crashes in RemapSIMDWithPermute on mobile platforms (iOS/Android)
                     var texture = new Texture2D(2, 2, TextureFormat.RGBA32, settings.GenerateMipMaps);
                     texture.filterMode = settings.FilterMode;
                     texture.wrapMode = TextureWrapMode.Clamp;
                     texture.name = $"RuntimeAtlas_Page{i}_Loaded";
 
+                    // ✅ LoadImage will resize the texture and load pixel data
                     if (!texture.LoadImage(pngData))
                     {
                         Debug.LogError($"[AtlasPersistence] LoadImage FAILED for page {i}");
                         UnityEngine.Object.Destroy(texture);
                         continue;
                     }
-                    
+
+                    Debug.Log($"[AtlasPersistence] LoadImage completed for page {i}: Size = {texture.width}x{texture.height}, Format = {texture.format}");
+
+#if UNITY_IOS
+                    // ✅ iOS CRITICAL FIX: Convert to RGBA32 if LoadImage created ARGB32
+                    // LoadImage() ignores the texture format we specified and uses the PNG's native format (ARGB32)
+                    // This causes crashes in Metal's RemapSIMDWithPermute when uploading ARGB->RGBA
+                    // Fix: Re-create the texture with RGBA32 format and copy the pixel data
+                    if (texture.format == TextureFormat.ARGB32)
+                    {
+                        Debug.Log($"[AtlasPersistence] iOS: Converting texture from ARGB32 to RGBA32 to avoid Metal SIMD crash...");
+
+                        // Get pixels from ARGB32 texture
+                        var pixels = texture.GetPixels32();
+
+                        // Create new RGBA32 texture
+                        var rgbaTexture = new Texture2D(texture.width, texture.height, TextureFormat.RGBA32, settings.GenerateMipMaps);
+                        rgbaTexture.filterMode = settings.FilterMode;
+                        rgbaTexture.wrapMode = TextureWrapMode.Clamp;
+                        rgbaTexture.name = texture.name;
+
+                        // Copy pixels - Unity handles ARGB->RGBA conversion automatically in GetPixels32/SetPixels32
+                        rgbaTexture.SetPixels32(pixels);
+                        rgbaTexture.Apply(settings.GenerateMipMaps, false);
+
+                        // Destroy old texture and use new one
+                        UnityEngine.Object.Destroy(texture);
+                        texture = rgbaTexture;
+
+                        Debug.Log($"[AtlasPersistence] iOS: Conversion complete. New format: {texture.format}");
+                    }
+#endif
+
 #if UNITY_EDITOR
-                    Debug.Log($"[AtlasPersistence] LoadImage SUCCESS for page {i}: Size = {texture.width}x{texture.height}, Format = {texture.format}");
-                    
+                    Debug.Log($"[AtlasPersistence] Final texture format for page {i}: {texture.format}");
+
+                    // Verify texture is readable before Apply
                     if (!texture.isReadable)
                     {
                         Debug.LogError($"[AtlasPersistence] ⚠️ Texture is non-readable after LoadImage!");
                     }
-                    
+
                     // ✅ DIAGNOSTIC: Check pixel data BEFORE Apply()
                     try
                     {
@@ -1061,26 +1102,67 @@ namespace RuntimeAtlasPacker
                     }
 #endif
 
+                    // Create texture from PNG data
+                    // ✅ CRITICAL FIX: Create as READABLE 
+                    // The 3rd parameter (mipChain) determines if mipmaps are generated
+                    // We do NOT pass a 5th parameter - Unity will create a readable texture by default
+                    // ✅ PLATFORM FIX: Always use RGBA32 when loading from PNG to avoid SIMD conversion issues
+                    // PNG files are naturally RGBA format, using RGBA32 prevents format conversion issues
+                    // This prevents crashes in RemapSIMDWithPermute on mobile platforms (iOS/Android)
                     var texture = new Texture2D(2, 2, TextureFormat.RGBA32, settings.GenerateMipMaps);
                     texture.filterMode = settings.FilterMode;
                     texture.wrapMode = TextureWrapMode.Clamp;
                     texture.name = $"RuntimeAtlas_Page{i}_Loaded";
 
+                    // ✅ LoadImage will resize the texture and load pixel data
                     if (!texture.LoadImage(pngData))
                     {
                         Debug.LogError($"[AtlasPersistence] LoadImage FAILED for page {i}");
                         UnityEngine.Object.Destroy(texture);
                         continue;
                     }
-                    
+
+                    Debug.Log($"[AtlasPersistence] LoadImage completed for page {i}: Size = {texture.width}x{texture.height}, Format = {texture.format}");
+
+#if UNITY_IOS
+                    // ✅ iOS CRITICAL FIX: Convert to RGBA32 if LoadImage created ARGB32
+                    // LoadImage() ignores the texture format we specified and uses the PNG's native format (ARGB32)
+                    // This causes crashes in Metal's RemapSIMDWithPermute when uploading ARGB->RGBA
+                    // Fix: Re-create the texture with RGBA32 format and copy the pixel data
+                    if (texture.format == TextureFormat.ARGB32)
+                    {
+                        Debug.Log($"[AtlasPersistence] iOS: Converting texture from ARGB32 to RGBA32 to avoid Metal SIMD crash...");
+
+                        // Get pixels from ARGB32 texture
+                        var pixels = texture.GetPixels32();
+
+                        // Create new RGBA32 texture
+                        var rgbaTexture = new Texture2D(texture.width, texture.height, TextureFormat.RGBA32, settings.GenerateMipMaps);
+                        rgbaTexture.filterMode = settings.FilterMode;
+                        rgbaTexture.wrapMode = TextureWrapMode.Clamp;
+                        rgbaTexture.name = texture.name;
+
+                        // Copy pixels - Unity handles ARGB->RGBA conversion automatically in GetPixels32/SetPixels32
+                        rgbaTexture.SetPixels32(pixels);
+                        rgbaTexture.Apply(settings.GenerateMipMaps, false);
+
+                        // Destroy old texture and use new one
+                        UnityEngine.Object.Destroy(texture);
+                        texture = rgbaTexture;
+
+                        Debug.Log($"[AtlasPersistence] iOS: Conversion complete. New format: {texture.format}");
+                    }
+#endif
+
 #if UNITY_EDITOR
-                    Debug.Log($"[AtlasPersistence] LoadImage SUCCESS for page {i}: Size = {texture.width}x{texture.height}, Format = {texture.format}");
-                    
+                    Debug.Log($"[AtlasPersistence] Final texture format for page {i}: {texture.format}");
+
+                    // Verify texture is readable before Apply
                     if (!texture.isReadable)
                     {
                         Debug.LogError($"[AtlasPersistence] ⚠️ Texture is non-readable after LoadImage!");
                     }
-                    
+
                     // ✅ DIAGNOSTIC: Check pixel data BEFORE Apply()
                     try
                     {
