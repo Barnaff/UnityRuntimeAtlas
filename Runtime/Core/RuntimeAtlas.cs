@@ -1131,33 +1131,36 @@ namespace RuntimeAtlasPacker
                         if (pageIndex >= 0 && pageIndex < _textures.Count)
                         {
                             var pageTexture = _textures[pageIndex];
-                            
+
+                            Debug.Log($"[RuntimeAtlas.AddBatch] Processing page {pageIndex}...");
+                            Debug.Log($"[RuntimeAtlas.AddBatch] Page {pageIndex} - Name: {pageTexture.name}, Size: {pageTexture.width}x{pageTexture.height}, Format: {pageTexture.format}, Readable: {pageTexture.isReadable}");
+
                             // Skip if we're trying to make non-readable but it's already non-readable
                             if (makeNoLongerReadable && !pageTexture.isReadable)
                             {
-#if UNITY_EDITOR
                                 Debug.Log($"[RuntimeAtlas.AddBatch] Page {pageIndex} already non-readable, skipping Apply");
-#endif
                                 continue;
                             }
-                            
+
+                            Debug.Log($"[RuntimeAtlas.AddBatch] >>> ABOUT TO CALL Apply on page {pageIndex} - makeNoLongerReadable={makeNoLongerReadable} <<<");
+                            Debug.Log($"[RuntimeAtlas.AddBatch] Memory before Apply: {System.GC.GetTotalMemory(false) / 1024 / 1024} MB");
+
                             // ✅ KEY OPTIMIZATION: Call Apply ONCE per page after all textures added
                             // makeNoLongerReadable=true: Frees CPU memory (texture becomes non-readable)
                             // makeNoLongerReadable=false: Keeps CPU memory (texture stays readable)
                             pageTexture.Apply(false, makeNoLongerReadable);
-                            
-#if UNITY_EDITOR || UNITY_IOS
-                            Debug.Log($"[RuntimeAtlas.AddBatch] ✓ Page {pageIndex}: Applied (readable={!makeNoLongerReadable})");
-#endif
+
+                            Debug.Log($"[RuntimeAtlas.AddBatch] ✓ Page {pageIndex}: Apply completed successfully");
+                            Debug.Log($"[RuntimeAtlas.AddBatch] Memory after Apply: {System.GC.GetTotalMemory(false) / 1024 / 1024} MB");
                         }
                     }
                     _isDirty = false;
                 }
                 catch (UnityException ex)
                 {
-#if UNITY_EDITOR || UNITY_IOS
-                    Debug.LogError($"[RuntimeAtlas.AddBatch] ✗ Failed to apply texture changes: {ex.Message}\nStack: {ex.StackTrace}");
-#endif
+                    Debug.LogError($"[RuntimeAtlas.AddBatch] ✗ CRASH during Apply: {ex.Message}");
+                    Debug.LogError($"[RuntimeAtlas.AddBatch] Stack trace: {ex.StackTrace}");
+                    throw; // Re-throw to preserve stack trace
                 }
             }
             
