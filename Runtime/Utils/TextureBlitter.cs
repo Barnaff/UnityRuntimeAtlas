@@ -651,22 +651,56 @@ Shader ""Hidden/RuntimeAtlasPacker/Blit""
         }
 
         /// <summary>
-        /// Direct CPU-based pixel copy using SetPixels (not SetPixels32).
+        /// Direct CPU-based pixel copy using SetPixels32 (byte format).
         /// This avoids the Metal format conversion that causes crashes on iOS.
-        /// More memory efficient than BlitCPU as it only copies the source region.
+        /// Uses Color32 (byte) format to match ARGB32/RGBA32 textures directly.
         /// </summary>
         private static void BlitCPUDirect(Texture2D source, Texture2D target, int x, int y)
         {
-            // Get only the source pixels (small texture, e.g., 256x256)
-            var sourcePixels = source.GetPixels();
+            Debug.Log($"[TextureBlitter.BlitCPUDirect] Starting CPU copy: {source.width}x{source.height} -> ({x},{y})");
 
-            // Set pixels directly at the target location
-            // This uses the block-copy variant which is more efficient
-            target.SetPixels(x, y, source.width, source.height, sourcePixels);
+            // Get source pixels as Color32 (byte format - matches ARGB32)
+            var sourcePixels = source.GetPixels32();
+            Debug.Log($"[TextureBlitter.BlitCPUDirect] Got source pixels: {sourcePixels.Length} pixels");
+
+            // Get target pixels, modify the region, then set back
+            // This is necessary because SetPixels32 doesn't have a region overload
+            var targetPixels = target.GetPixels32();
+            Debug.Log($"[TextureBlitter.BlitCPUDirect] Got target pixels: {targetPixels.Length} pixels");
+
+            // Copy source pixels into the correct position in target
+            int srcWidth = source.width;
+            int srcHeight = source.height;
+            int tgtWidth = target.width;
+
+            for (int sy = 0; sy < srcHeight; sy++)
+            {
+                int srcRow = sy * srcWidth;
+                int tgtRow = (y + sy) * tgtWidth + x;
+
+                for (int sx = 0; sx < srcWidth; sx++)
+                {
+                    targetPixels[tgtRow + sx] = sourcePixels[srcRow + sx];
+                }
+            }
+
+            Debug.Log($"[TextureBlitter.BlitCPUDirect] Pixels copied, calling SetPixels32...");
+
+            // Set all pixels back
+            target.SetPixels32(targetPixels);
+
+            Debug.Log($"[TextureBlitter.BlitCPUDirect] SetPixels32 complete, calling Apply...");
 
             // Apply changes - this uploads to GPU
-            // Using updateMipmaps=false and makeNoLongerReadable=false
             target.Apply(false, false);
+
+            Debug.Log($"[TextureBlitter.BlitCPUDirect] Apply complete");
+
+#if UNITY_IOS
+            // ✅ iOS CRITICAL FIX: Force GPU to complete the texture upload
+            GL.Flush();
+            Debug.Log($"[TextureBlitter.BlitCPUDirect] iOS: GL.Flush() complete");
+#endif
         }
 
         /// <summary>
