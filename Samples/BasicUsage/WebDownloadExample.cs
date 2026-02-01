@@ -81,12 +81,20 @@ namespace RuntimeAtlasPacker.Samples
         private CancellationTokenSource _cts;
         private int _imageCounter = 0;
         private int _downloadsSinceLastBatch = 0;
-        private string _activeAtlasName; // Track which atlas we're using
+        private string _activeAtlasName;
+        private bool _useAsyncApiNext = false; // Alternate between batch and async API
+
+        private enum DownloadMethod
+        {
+            Batch,
+            SingleAsync
+        }
 
         private class ImageData
         {
             public AtlasEntry Entry;
             public GameObject GameObject;
+            public DownloadMethod Method;
         }
 
         private void Start()
@@ -177,7 +185,16 @@ namespace RuntimeAtlasPacker.Samples
                     }
                     else
                     {
-                        _ = AddNewImage();
+                        // Alternate between old API and new DownloadAndAddAsync API
+                        if (_useAsyncApiNext)
+                        {
+                            _ = AddNewImageUsingAsyncAPI();
+                        }
+                        else
+                        {
+                            _ = AddNewImage();
+                        }
+                        _useAsyncApiNext = !_useAsyncApiNext;
                     }
                 }
             }
@@ -257,7 +274,8 @@ namespace RuntimeAtlasPacker.Samples
             _imageDataList.Add(new ImageData
             {
                 Entry = entry,
-                GameObject = go
+                GameObject = go,
+                Method = DownloadMethod.Batch
             });
 
             // Get overflow count based on which atlas we're using
@@ -266,6 +284,68 @@ namespace RuntimeAtlasPacker.Samples
                 : AtlasPacker.GetDefaultOverflowCount();
                 
             Debug.Log($"[WebDownload] Added image {_imageCounter} - " +
+                     $"Total atlases: {overflowCount + 1}, " +
+                     $"Total images: {_imageDataList.Count}");
+        }
+
+        private async Task AddNewImageUsingAsyncAPI()
+        {
+            Debug.Log($"[WebDownload] AddNewImageUsingAsyncAPI: START (using DownloadAndAddAsync)");
+            
+            string url = GetRandomImageUrl(_imageCounter++);
+            Debug.Log($"[WebDownload] AddNewImageUsingAsyncAPI: Downloading from URL: {url}");
+            
+            // Use RuntimeAtlas.DownloadAndAddAsync - downloads and adds in one call!
+            AtlasEntry entry;
+            if (!string.IsNullOrEmpty(_activeAtlasName))
+            {
+                var atlas = AtlasPacker.GetOrCreate(_activeAtlasName);
+                entry = await atlas.DownloadAndAddAsync(url, key: $"AsyncImage_{_imageCounter}", version: 0, _cts.Token);
+                Debug.Log($"[WebDownload] Downloaded and added to named atlas '{_activeAtlasName}': Entry={entry != null}");
+            }
+            else
+            {
+                var atlas = AtlasPacker.Default;
+                entry = await atlas.DownloadAndAddAsync(url, key: $"AsyncImage_{_imageCounter}", version: 0, _cts.Token);
+                Debug.Log($"[WebDownload] Downloaded and added to default atlas: Entry={entry != null}");
+            }
+
+            if (entry == null)
+            {
+                Debug.LogWarning($"[WebDownload] DownloadAndAddAsync failed - returned null");
+                return;
+            }
+            
+            if (!entry.IsValid)
+            {
+                Debug.LogError($"[WebDownload] Entry created but IsValid=false!");
+                return;
+            }
+            
+            Debug.Log($"[WebDownload] AddNewImageUsingAsyncAPI: Creating UI object for entry...");
+
+            var go = CreateImageObject(entry, DownloadMethod.SingleAsync);
+            
+            if (go == null)
+            {
+                Debug.LogError($"[WebDownload] Failed to create image object!");
+                return;
+            }
+            
+            Debug.Log($"[WebDownload] AddNewImageUsingAsyncAPI: UI object created: {go.name}");
+            
+            _imageDataList.Add(new ImageData
+            {
+                Entry = entry,
+                GameObject = go,
+                Method = DownloadMethod.SingleAsync
+            });
+
+            int overflowCount = !string.IsNullOrEmpty(_activeAtlasName) 
+                ? AtlasPacker.GetOverflowCount(_activeAtlasName)
+                : AtlasPacker.GetDefaultOverflowCount();
+                
+            Debug.Log($"[WebDownload] Added image {_imageCounter} via DownloadAndAddAsync - " +
                      $"Total atlases: {overflowCount + 1}, " +
                      $"Total images: {_imageDataList.Count}");
         }
@@ -327,11 +407,12 @@ namespace RuntimeAtlasPacker.Samples
             // Create UI objects for all entries
             foreach (var entry in entries)
             {
-                var go = CreateImageObject(entry);
+                var go = CreateImageObject(entry, DownloadMethod.Batch);
                 _imageDataList.Add(new ImageData
                 {
                     Entry = entry,
-                    GameObject = go
+                    GameObject = go,
+                    Method = DownloadMethod.Batch
                 });
             }
             
@@ -375,7 +456,7 @@ namespace RuntimeAtlasPacker.Samples
                      $"Total images: {_imageDataList.Count}");
         }
 
-        private GameObject CreateImageObject(AtlasEntry entry)
+        private GameObject CreateImageObject(AtlasEntry entry, DownloadMethod method = DownloadMethod.Batch)
         {
             if (uiContainer == null || uiImagePrefab == null)
             {
@@ -384,7 +465,7 @@ namespace RuntimeAtlasPacker.Samples
             }
 
             var go = Instantiate(uiImagePrefab, uiContainer);
-            go.name = $"WebImage_{_imageCounter}";
+            go.name = $"WebImage_{_imageCounter}_{method}";
 
             var atlasImage = go.GetComponent<AtlasImage>();
             if (atlasImage == null)
@@ -392,6 +473,61 @@ namespace RuntimeAtlasPacker.Samples
                 atlasImage = go.AddComponent<AtlasImage>();
             }
             atlasImage.SetEntry(entry);
+
+            // Add visual distinction based on download method
+            // Find the actual Image component (might be on child)
+            var image = go.GetComponentInChildren<UnityEngine.UI.Image>(true);
+            if (image != null)
+            {
+                // Add color tint to the image for visual distinction
+                switch (method)
+                {
+                    case DownloadMethod.Batch:
+                        // Slight green tint for batch downloads
+                        image.color = new Color(0.8f, 1f, 0.8f, 1f);
+                        break;
+                        
+                    case DownloadMethod.SingleAsync:
+                        // Slight magenta tint for DownloadAndAddAsync
+                        image.color = new Color(1f, 0.8f, 1f, 1f);
+                        break;
+                }
+                
+                // Add colored outline to the image GameObject
+                var imageGO = image.gameObject;
+                var outline = imageGO.GetComponent<UnityEngine.UI.Outline>();
+                if (outline == null)
+                {
+                    outline = imageGO.AddComponent<UnityEngine.UI.Outline>();
+                }
+                
+                // Add shadow for extra prominence
+                var shadow = imageGO.GetComponent<UnityEngine.UI.Shadow>();
+                if (shadow == null)
+                {
+                    shadow = imageGO.AddComponent<UnityEngine.UI.Shadow>();
+                }
+                
+                // Set outline and shadow colors based on download method
+                switch (method)
+                {
+                    case DownloadMethod.Batch:
+                        // Bright green outline and shadow for batch downloads
+                        outline.effectColor = new Color(0f, 1f, 0f, 1f);
+                        outline.effectDistance = new Vector2(5, -5);
+                        shadow.effectColor = new Color(0f, 0.6f, 0f, 0.8f);
+                        shadow.effectDistance = new Vector2(3, -3);
+                        break;
+                        
+                    case DownloadMethod.SingleAsync:
+                        // Bright magenta outline and shadow for DownloadAndAddAsync
+                        outline.effectColor = new Color(1f, 0f, 1f, 1f);
+                        outline.effectDistance = new Vector2(5, -5);
+                        shadow.effectColor = new Color(0.8f, 0f, 0.8f, 0.8f);
+                        shadow.effectDistance = new Vector2(3, -3);
+                        break;
+                }
+            }
 
             return go;
         }

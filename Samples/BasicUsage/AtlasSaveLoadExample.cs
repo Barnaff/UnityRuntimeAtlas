@@ -54,6 +54,15 @@ namespace RuntimeAtlasPacker.Samples
         private ScrollRect _scrollRect;
         private Text _statusText;
         private CancellationTokenSource _cts;
+        
+        // Track download methods for visual distinction
+        private enum DownloadMethod
+        {
+            Batch,
+            SingleAsync
+        }
+        
+        private Dictionary<string, DownloadMethod> _entryDownloadMethods = new Dictionary<string, DownloadMethod>();
 
         private void Start()
         {
@@ -310,29 +319,89 @@ namespace RuntimeAtlasPacker.Samples
 
         private async Task DownloadAndAddImagesAsync(int count)
         {
-            LogDebug($"Downloading and adding {count} random images using AtlasWebLoader...");
+            LogDebug($"Downloading and adding {count} images using mixed methods (batch + single async)...");
 
-            // Generate URLs with names
-            var urlsWithNames = new Dictionary<string, string>();
-            for (var i = 0; i < count; i++)
+            // Download images using both batch and single async methods
+            // First half: batch download
+            // Second half: alternating single async downloads
+            
+            int batchCount = count / 2;
+            int singleCount = count - batchCount;
+            
+            // Part 1: Batch download
+            if (batchCount > 0)
             {
-                var size = _imageSize + UnityEngine.Random.Range(-_imageSizeVariation, _imageSizeVariation + 1);
-                size = Mathf.Clamp(size, 64, 512);
-                var randomIndex = UnityEngine.Random.Range(1, 99999);
-                var url = $"https://picsum.photos/{size}/{size}?random={randomIndex}";
-                var imageName = $"RandomImage_{i}_{size}x{size}";
-                
-                urlsWithNames[url] = imageName;
+                LogDebug($"Part 1: Batch downloading {batchCount} images...");
+                var urlsWithNames = new Dictionary<string, string>();
+                for (var i = 0; i < batchCount; i++)
+                {
+                    var size = _imageSize + UnityEngine.Random.Range(-_imageSizeVariation, _imageSizeVariation + 1);
+                    size = Mathf.Clamp(size, 64, 512);
+                    var randomIndex = UnityEngine.Random.Range(1, 99999);
+                    var url = $"https://picsum.photos/{size}/{size}?random={randomIndex}";
+                    var imageName = $"BatchImage_{i}_{size}x{size}";
+                    
+                    urlsWithNames[url] = imageName;
+                }
+
+                try
+                {
+                    var entries = await _atlas.DownloadAndAddBatchAsync(urlsWithNames, versions: null, maxConcurrentDownloads: 4, cancellationToken: _cts.Token);
+                    
+                    // Track as batch downloads
+                    foreach (var kvp in entries)
+                    {
+                        _entryDownloadMethods[kvp.Key] = DownloadMethod.Batch;
+                    }
+                    
+                    LogDebug($"✓ Batch downloaded {entries.Count} images");
+                }
+                catch (Exception ex)
+                {
+                    LogDebug($"✗ Error in batch download: {ex.Message}");
+                }
             }
-
-            // Use AtlasWebLoader to download and add all images in batch
-            try
+            
+            // Part 2: Single async downloads (using DownloadAndAddAsync API)
+            if (singleCount > 0)
             {
-                var entries = await _atlas.DownloadAndAddBatchAsync(urlsWithNames, versions: null, maxConcurrentDownloads: 4, cancellationToken: _cts.Token);
+                LogDebug($"Part 2: Single async downloading {singleCount} images...");
+                int successCount = 0;
                 
-                var successCount = entries.Count;
-            LogDebug($"✓ Successfully downloaded and added {count}/{count} images");
-            LogDebug($"  - Atlas now has {_atlas.EntryCount} entries across {_atlas.PageCount} page(s)");
+                for (var i = 0; i < singleCount; i++)
+                {
+                    var size = _imageSize + UnityEngine.Random.Range(-_imageSizeVariation, _imageSizeVariation + 1);
+                    size = Mathf.Clamp(size, 64, 512);
+                    var randomIndex = UnityEngine.Random.Range(1, 99999);
+                    var url = $"https://picsum.photos/{size}/{size}?random={randomIndex}";
+                    var imageName = $"AsyncImage_{i}_{size}x{size}";
+                    
+                    try
+                    {
+                        // Use the single image DownloadAndAddAsync API
+                        var entry = await _atlas.DownloadAndAddAsync(url, key: imageName, version: 0, cancellationToken: _cts.Token);
+                        
+                        if (entry != null && entry.IsValid)
+                        {
+                            _entryDownloadMethods[imageName] = DownloadMethod.SingleAsync;
+                            successCount++;
+                            LogDebug($"  ✓ Downloaded '{imageName}' using DownloadAndAddAsync");
+                        }
+                        else
+                        {
+                            LogDebug($"  ✗ Failed to download '{imageName}'");
+                        }
+                    }
+                    catch (Exception ex)
+                    {
+                        LogDebug($"  ✗ Error downloading '{imageName}': {ex.Message}");
+                    }
+                }
+                
+                LogDebug($"✓ Single async downloaded {successCount}/{singleCount} images");
+            }
+            
+            LogDebug($"✓ Downloaded total of {_atlas.EntryCount} images across {_atlas.PageCount} page(s)");
             
             // Log each page's details
             for (var i = 0; i < _atlas.PageCount; i++)
@@ -341,13 +410,7 @@ namespace RuntimeAtlasPacker.Samples
                 LogDebug($"  - Page {i}: {pageTexture?.name}, {pageTexture?.width}x{pageTexture?.height}, Readable: {pageTexture?.isReadable}");
             }
             
-            UpdateStatus($"Downloaded and added {count}/{count} images across {_atlas.PageCount} page(s)");
-            }
-            catch (Exception ex)
-            {
-                LogDebug($"✗ Error downloading images: {ex.Message}");
-                UpdateStatus($"Error: {ex.Message}");
-            }
+            UpdateStatus($"Downloaded {count} images ({batchCount} batch, {singleCount} async) across {_atlas.PageCount} page(s)");
         }
 
         private void CreateEmptyAtlas()
@@ -539,6 +602,9 @@ namespace RuntimeAtlasPacker.Samples
                     var rectTransform = imageGO.GetComponent<RectTransform>();
                     rectTransform.sizeDelta = new Vector2(_imageSize_UI, _imageSize_UI);
 
+                    // Add visual distinction based on download method
+                    ApplyVisualDistinction(image, entry.Name);
+
                     totalDisplayed++;
                 }
             }
@@ -596,6 +662,55 @@ namespace RuntimeAtlasPacker.Samples
                 {
                     DestroyImmediate(child.gameObject);
                 }
+            }
+        }
+
+        private void ApplyVisualDistinction(Image image, string entryName)
+        {
+            // Check if we have tracked download method for this entry
+            if (!_entryDownloadMethods.TryGetValue(entryName, out var method))
+            {
+                // Default to batch if not tracked (e.g., loaded from save)
+                method = DownloadMethod.Batch;
+            }
+            
+            var imageGO = image.gameObject;
+            
+            // Add color tint based on download method
+            switch (method)
+            {
+                case DownloadMethod.Batch:
+                    // Slight green tint for batch downloads
+                    image.color = new Color(0.8f, 1f, 0.8f, 1f);
+                    break;
+                    
+                case DownloadMethod.SingleAsync:
+                    // Slight magenta tint for DownloadAndAddAsync
+                    image.color = new Color(1f, 0.8f, 1f, 1f);
+                    break;
+            }
+            
+            // Add colored outline
+            var outline = imageGO.AddComponent<UnityEngine.UI.Outline>();
+            var shadow = imageGO.AddComponent<UnityEngine.UI.Shadow>();
+            
+            switch (method)
+            {
+                case DownloadMethod.Batch:
+                    // Bright green outline and shadow for batch downloads
+                    outline.effectColor = new Color(0f, 1f, 0f, 1f);
+                    outline.effectDistance = new Vector2(5, -5);
+                    shadow.effectColor = new Color(0f, 0.6f, 0f, 0.8f);
+                    shadow.effectDistance = new Vector2(3, -3);
+                    break;
+                    
+                case DownloadMethod.SingleAsync:
+                    // Bright magenta outline and shadow for DownloadAndAddAsync
+                    outline.effectColor = new Color(1f, 0f, 1f, 1f);
+                    outline.effectDistance = new Vector2(5, -5);
+                    shadow.effectColor = new Color(0.8f, 0f, 0.8f, 0.8f);
+                    shadow.effectDistance = new Vector2(3, -3);
+                    break;
             }
         }
 

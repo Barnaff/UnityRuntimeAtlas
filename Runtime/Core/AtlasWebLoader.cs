@@ -209,7 +209,7 @@ namespace RuntimeAtlasPacker
             if (textureBatch.Count > 0)
             {
                 // Add all to atlas in one batch (more efficient)
-                var entries = _atlas.AddBatch(textureBatch);
+                var entries = versions != null ? _atlas.AddBatch(textureBatch, versions) : _atlas.AddBatch(textureBatch);
 
                 // Create sprites from successful entries
                 foreach (var kvp in entries)

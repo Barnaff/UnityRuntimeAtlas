@@ -1553,7 +1553,9 @@ namespace RuntimeAtlasPacker
                 [url] = key ?? $"Remote_{url.GetHashCode():X8}"
             };
 
-            var versions = version != 0 ? new Dictionary<string, int> { [key ?? urlsWithKeys[url]] = version } : null;
+            // Use the same key as urlsWithKeys for versions lookup
+            var resolvedKey = urlsWithKeys[url];
+            var versions = version != 0 ? new Dictionary<string, int> { [resolvedKey] = version } : null;
 
             var results = await DownloadAndAddBatchAsync(urlsWithKeys, versions, maxConcurrentDownloads: 1, cancellationToken);
             
