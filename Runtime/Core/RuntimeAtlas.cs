@@ -1531,11 +1531,13 @@ namespace RuntimeAtlasPacker
         /// </summary>
         /// <param name="url">URL to download image from</param>
         /// <param name="key">Optional custom key/name for the entry (uses URL hash if null)</param>
+        /// <param name="version">Optional version number for the sprite (default: 0)</param>
         /// <param name="cancellationToken">Optional cancellation token</param>
         /// <returns>Atlas entry for the downloaded image, or null if failed</returns>
         public async Task<AtlasEntry> DownloadAndAddAsync(
             string url,
             string key = null,
+            int version = 0,
             CancellationToken cancellationToken = default)
         {
             if (string.IsNullOrEmpty(url))
@@ -1546,13 +1548,14 @@ namespace RuntimeAtlasPacker
                 return null;
             }
 
-            // Use single-item batch for consistency
             var urlsWithKeys = new Dictionary<string, string>
             {
                 [url] = key ?? $"Remote_{url.GetHashCode():X8}"
             };
 
-            var results = await DownloadAndAddBatchAsync(urlsWithKeys, versions: null, maxConcurrentDownloads: 1, cancellationToken);
+            var versions = version != 0 ? new Dictionary<string, int> { [key ?? urlsWithKeys[url]] = version } : null;
+
+            var results = await DownloadAndAddBatchAsync(urlsWithKeys, versions, maxConcurrentDownloads: 1, cancellationToken);
             
             return results.Values.FirstOrDefault();
         }
