@@ -47,11 +47,24 @@ namespace RuntimeAtlasPacker
         /// </summary>
         public static void Blit(Texture2D source, Texture2D target, int x, int y)
         {
+            Debug.Log($"[TextureBlitter.Blit] ========== SINGLE BLIT START ==========");
+            
             if (source == null || target == null)
+            {
+                Debug.LogError($"[TextureBlitter.Blit] NULL parameter - source: {source != null}, target: {target != null}");
                 throw new ArgumentNullException();
+            }
+
+            Debug.Log($"[TextureBlitter.Blit] Source: '{source.name}', {source.width}x{source.height}, Format: {source.format}, Readable: {source.isReadable}");
+            Debug.Log($"[TextureBlitter.Blit] Target: '{target.name}', {target.width}x{target.height}, Format: {target.format}, Readable: {target.isReadable}");
+            Debug.Log($"[TextureBlitter.Blit] Position: ({x}, {y})");
+            Debug.Log($"[TextureBlitter.Blit] Memory before blit: {System.GC.GetTotalMemory(false) / (1024 * 1024)}MB");
 
             // Use Material-based rendering - works with ALL textures
             BlitWithMaterial(source, target, x, y);
+            
+            Debug.Log($"[TextureBlitter.Blit] Memory after blit: {System.GC.GetTotalMemory(false) / (1024 * 1024)}MB");
+            Debug.Log($"[TextureBlitter.Blit] ========== SINGLE BLIT END ==========");
         }
 
         /// <summary>

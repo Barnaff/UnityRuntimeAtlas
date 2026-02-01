@@ -176,10 +176,13 @@ namespace RuntimeAtlasPacker
             }
 
             var totalCount = urlsWithNames.Count;
+            Debug.Log($"[AtlasWebLoader.DownloadAndAddBatchAsync] ===== START BATCH DOWNLOAD ===== Total items: {totalCount}");
+            
             var downloadFailures = new List<string>();
             var addFailures = new List<string>();
 
             // Download all textures (allow partial failures)
+            Debug.Log($"[AtlasWebLoader.DownloadAndAddBatchAsync] Creating {totalCount} download tasks...");
             var downloadTasks = new List<Task<(string name, Texture2D texture)>>();
 
             foreach (var kvp in urlsWithNames)
@@ -187,91 +190,108 @@ namespace RuntimeAtlasPacker
                 downloadTasks.Add(DownloadTextureAsync(kvp.Key, kvp.Value, cancellationToken));
             }
 
+            Debug.Log($"[AtlasWebLoader.DownloadAndAddBatchAsync] Waiting for all downloads to complete...");
             var downloadedTextures = await Task.WhenAll(downloadTasks);
+            Debug.Log($"[AtlasWebLoader.DownloadAndAddBatchAsync] All download tasks completed");
 
             // Build batch dictionary (only successful downloads)
+            Debug.Log($"[AtlasWebLoader.DownloadAndAddBatchAsync] Building texture batch from downloaded textures...");
             var textureBatch = new Dictionary<string, Texture2D>();
             foreach (var (name, texture) in downloadedTextures)
             {
                 if (texture != null)
                 {
                     textureBatch[name] = texture;
+                    Debug.Log($"[AtlasWebLoader.DownloadAndAddBatchAsync] Added '{name}' to batch - {texture.width}x{texture.height}, format: {texture.format}");
                 }
                 else
                 {
                     downloadFailures.Add(name);
+                    Debug.LogWarning($"[AtlasWebLoader.DownloadAndAddBatchAsync] Failed to download '{name}'");
                 }
             }
 
+            Debug.Log($"[AtlasWebLoader.DownloadAndAddBatchAsync] Texture batch built: {textureBatch.Count} successful, {downloadFailures.Count} failed");
+            
             var results = new Dictionary<string, Sprite>();
 
             // Only proceed with batch add if we have any successful downloads
             if (textureBatch.Count > 0)
             {
                 // Add all to atlas in one batch (more efficient)
+                Debug.Log($"[AtlasWebLoader.DownloadAndAddBatchAsync] Calling atlas.AddBatch with {textureBatch.Count} textures...");
+                Debug.Log($"[AtlasWebLoader.DownloadAndAddBatchAsync] Memory before AddBatch: {System.GC.GetTotalMemory(false) / (1024 * 1024)}MB");
+                
                 var entries = versions != null ? _atlas.AddBatch(textureBatch, versions) : _atlas.AddBatch(textureBatch);
+                
+                Debug.Log($"[AtlasWebLoader.DownloadAndAddBatchAsync] AddBatch completed, returned {entries.Count} entries");
+                Debug.Log($"[AtlasWebLoader.DownloadAndAddBatchAsync] Memory after AddBatch: {System.GC.GetTotalMemory(false) / (1024 * 1024)}MB");
 
                 // Create sprites from successful entries
+                Debug.Log($"[AtlasWebLoader.DownloadAndAddBatchAsync] Creating sprites from entries...");
                 foreach (var kvp in entries)
                 {
                     if (kvp.Value != null && kvp.Value.IsValid)
                     {
+                        Debug.Log($"[AtlasWebLoader.DownloadAndAddBatchAsync] Creating sprite for '{kvp.Key}'...");
                         var sprite = kvp.Value.CreateSprite();
                         
                         // Verify sprite is valid before adding to results
                         if (sprite != null && sprite.texture != null)
                         {
                             results[kvp.Key] = sprite;
-#if UNITY_EDITOR
-                            Debug.Log($"[AtlasWebLoader] ✓ Batch created sprite '{sprite.name}' - Texture: {sprite.texture.name}");
-#endif
+                            Debug.Log($"[AtlasWebLoader.DownloadAndAddBatchAsync] ✓ Sprite created successfully for '{kvp.Key}' - Texture: {sprite.texture.name}");
                         }
                         else
                         {
                             addFailures.Add(kvp.Key);
-#if UNITY_EDITOR
-                            Debug.LogWarning($"[AtlasWebLoader] Batch sprite '{kvp.Key}' is invalid - sprite: {sprite != null}, texture: {sprite?.texture != null}");
-#endif
+                            Debug.LogWarning($"[AtlasWebLoader.DownloadAndAddBatchAsync] Sprite invalid for '{kvp.Key}' - sprite: {sprite != null}, texture: {sprite?.texture != null}");
                         }
                     }
                     else
                     {
                         addFailures.Add(kvp.Key);
+                        Debug.LogWarning($"[AtlasWebLoader.DownloadAndAddBatchAsync] Entry invalid for '{kvp.Key}'");
                     }
                 }
 
+                Debug.Log($"[AtlasWebLoader.DownloadAndAddBatchAsync] Sprites created: {results.Count}. Now cleaning up downloaded textures...");
+                
                 // Cleanup downloaded textures
-                foreach (var texture in textureBatch.Values)
+                int cleanupCount = 0;
+                foreach (var kvp in textureBatch)
                 {
-                    if (texture != null)
+                    if (kvp.Value != null)
                     {
-                        UnityEngine.Object.Destroy(texture);
+                        Debug.Log($"[AtlasWebLoader.DownloadAndAddBatchAsync] Destroying downloaded texture '{kvp.Key}'");
+                        UnityEngine.Object.Destroy(kvp.Value);
+                        cleanupCount++;
                     }
                 }
+                Debug.Log($"[AtlasWebLoader.DownloadAndAddBatchAsync] Cleanup complete: destroyed {cleanupCount} textures");
+                Debug.Log($"[AtlasWebLoader.DownloadAndAddBatchAsync] Memory after cleanup: {System.GC.GetTotalMemory(false) / (1024 * 1024)}MB");
             }
 
             // Report summary
             var successCount = results.Count;
             var failureCount = totalCount - successCount;
 
-#if UNITY_EDITOR
             if (failureCount > 0)
             {
-                Debug.LogWarning($"[AtlasWebLoader] Batch complete with partial success: {successCount}/{totalCount} succeeded, {failureCount} failed");
+                Debug.LogWarning($"[AtlasWebLoader.DownloadAndAddBatchAsync] ===== BATCH COMPLETE (PARTIAL) ===== Success: {successCount}/{totalCount}, Failed: {failureCount}");
                 if (downloadFailures.Count > 0)
                 {
-                    Debug.LogWarning($"[AtlasWebLoader] Download failures: {string.Join(", ", downloadFailures)}");
+                    Debug.LogWarning($"[AtlasWebLoader.DownloadAndAddBatchAsync] Download failures: {string.Join(", ", downloadFailures)}");
                 }
                 if (addFailures.Count > 0)
                 {
-                    Debug.LogWarning($"[AtlasWebLoader] Add failures: {string.Join(", ", addFailures)}");
+                    Debug.LogWarning($"[AtlasWebLoader.DownloadAndAddBatchAsync] Add failures: {string.Join(", ", addFailures)}");
                 }
             }
             else
             {
-                Debug.Log($"[AtlasWebLoader] Batch complete: All {successCount} sprites added successfully");
+                Debug.Log($"[AtlasWebLoader.DownloadAndAddBatchAsync] ===== BATCH COMPLETE (SUCCESS) ===== All {successCount} sprites added successfully");
             }
-#endif
 
             return results;
         }
@@ -326,12 +346,15 @@ namespace RuntimeAtlasPacker
             string name, 
             CancellationToken cancellationToken)
         {
+            Debug.Log($"[AtlasWebLoader.DownloadTextureAsync] START - name: '{name}', url: {url}");
             Texture2D downloadedTexture = null;
             
             try
             {
+                Debug.Log($"[AtlasWebLoader.DownloadTextureAsync] Creating web request for '{name}'");
                 using (var request = UnityWebRequestTexture.GetTexture(url))
                 {
+                    Debug.Log($"[AtlasWebLoader.DownloadTextureAsync] Sending web request for '{name}'");
                     var operation = request.SendWebRequest();
 
                     // Wait for download to complete
@@ -342,14 +365,24 @@ namespace RuntimeAtlasPacker
 
                     if (cancellationToken.IsCancellationRequested)
                     {
+                        Debug.LogWarning($"[AtlasWebLoader.DownloadTextureAsync] Request cancelled for '{name}'");
                         request.Abort();
                         return (name, null);
                     }
 
                     if (request.result == UnityWebRequest.Result.Success)
                     {
+                        Debug.Log($"[AtlasWebLoader.DownloadTextureAsync] Download SUCCESS for '{name}', getting content...");
                         downloadedTexture = DownloadHandlerTexture.GetContent(request);
+                        
+                        if (downloadedTexture == null)
+                        {
+                            Debug.LogError($"[AtlasWebLoader.DownloadTextureAsync] DownloadHandlerTexture.GetContent returned NULL for '{name}'");
+                            return (name, null);
+                        }
+                        
                         downloadedTexture.name = name;
+                        Debug.Log($"[AtlasWebLoader.DownloadTextureAsync] Downloaded texture '{name}' - Size: {downloadedTexture.width}x{downloadedTexture.height}, Format: {downloadedTexture.format}, Memory: {(downloadedTexture.width * downloadedTexture.height * 4) / 1024}KB");
 
 #if UNITY_IOS
                         // ✅ iOS CRITICAL FIX: Convert ARGB32 to RGBA32 to avoid Metal SIMD crash
@@ -357,39 +390,50 @@ namespace RuntimeAtlasPacker
                         // Metal's RemapSIMDWithPermute crashes when converting ARGB->RGBA during Apply()
                         if (downloadedTexture.format == TextureFormat.ARGB32)
                         {
-                            Debug.Log($"[AtlasWebLoader] iOS: Converting downloaded texture '{name}' from ARGB32 to RGBA32...");
+                            Debug.Log($"[AtlasWebLoader.DownloadTextureAsync] iOS: ARGB32 detected for '{name}', converting to RGBA32...");
 
+                            Debug.Log($"[AtlasWebLoader.DownloadTextureAsync] iOS: Getting pixels for '{name}'...");
                             var pixels = downloadedTexture.GetPixels32();
+                            Debug.Log($"[AtlasWebLoader.DownloadTextureAsync] iOS: Got {pixels.Length} pixels for '{name}'");
+                            
+                            Debug.Log($"[AtlasWebLoader.DownloadTextureAsync] iOS: Creating RGBA32 texture for '{name}'...");
                             var rgbaTexture = new Texture2D(downloadedTexture.width, downloadedTexture.height, TextureFormat.RGBA32, false);
                             rgbaTexture.name = name;
                             rgbaTexture.filterMode = downloadedTexture.filterMode;
                             rgbaTexture.wrapMode = downloadedTexture.wrapMode;
+                            
+                            Debug.Log($"[AtlasWebLoader.DownloadTextureAsync] iOS: Setting pixels for '{name}'...");
                             rgbaTexture.SetPixels32(pixels);
+                            
+                            Debug.Log($"[AtlasWebLoader.DownloadTextureAsync] iOS: Applying texture for '{name}'...");
                             rgbaTexture.Apply(false, false);
+                            Debug.Log($"[AtlasWebLoader.DownloadTextureAsync] iOS: Apply complete for '{name}'");
 
                             // Destroy old texture and use converted one
+                            Debug.Log($"[AtlasWebLoader.DownloadTextureAsync] iOS: Destroying old ARGB32 texture for '{name}'");
                             UnityEngine.Object.Destroy(downloadedTexture);
                             downloadedTexture = rgbaTexture;
 
-                            Debug.Log($"[AtlasWebLoader] iOS: Conversion complete. New format: {downloadedTexture.format}");
+                            Debug.Log($"[AtlasWebLoader.DownloadTextureAsync] iOS: Conversion COMPLETE for '{name}', new format: {downloadedTexture.format}");
                         }
 #endif
 
                         // Return texture - caller is responsible for cleanup
+                        Debug.Log($"[AtlasWebLoader.DownloadTextureAsync] Transferring texture ownership for '{name}' to caller");
                         var result = (name, downloadedTexture);
                         downloadedTexture = null; // Transfer ownership to caller
                         return result;
                     }
                     else
                     {
-                        Debug.LogWarning($"[AtlasWebLoader] Failed to download {url}: {request.error}");
+                        Debug.LogWarning($"[AtlasWebLoader.DownloadTextureAsync] Download FAILED for '{name}' from {url}: {request.error}");
                         return (name, null);
                     }
                 }
             }
             catch (Exception ex)
             {
-                Debug.LogError($"[AtlasWebLoader] Exception downloading {url}: {ex.Message}");
+                Debug.LogError($"[AtlasWebLoader.DownloadTextureAsync] EXCEPTION for '{name}': {ex.GetType().Name} - {ex.Message}\nStackTrace: {ex.StackTrace}");
                 return (name, null);
             }
             finally
@@ -397,6 +441,7 @@ namespace RuntimeAtlasPacker
                 // MEMORY LEAK FIX: Clean up texture if we still own it (error path)
                 if (downloadedTexture != null)
                 {
+                    Debug.LogWarning($"[AtlasWebLoader.DownloadTextureAsync] FINALLY block destroying leftover texture for '{name}' (error path)");
                     UnityEngine.Object.Destroy(downloadedTexture);
                 }
             }

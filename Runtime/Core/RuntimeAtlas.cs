@@ -1540,14 +1540,18 @@ namespace RuntimeAtlasPacker
             int version = 0,
             CancellationToken cancellationToken = default)
         {
+            Debug.Log($"[RuntimeAtlas.DownloadAndAddAsync] ========== START SINGLE DOWNLOAD ==========");
+            Debug.Log($"[RuntimeAtlas.DownloadAndAddAsync] URL: {url}");
+            Debug.Log($"[RuntimeAtlas.DownloadAndAddAsync] Key: {key ?? "(auto-generate)"}");
+            Debug.Log($"[RuntimeAtlas.DownloadAndAddAsync] Version: {version}");
+            
             if (string.IsNullOrEmpty(url))
             {
-#if UNITY_EDITOR
                 Debug.LogWarning("[RuntimeAtlas.DownloadAndAddAsync] URL is null or empty");
-#endif
                 return null;
             }
 
+            Debug.Log($"[RuntimeAtlas.DownloadAndAddAsync] Preparing download with key resolution...");
             var urlsWithKeys = new Dictionary<string, string>
             {
                 [url] = key ?? $"Remote_{url.GetHashCode():X8}"
@@ -1555,11 +1559,32 @@ namespace RuntimeAtlasPacker
 
             // Use the same key as urlsWithKeys for versions lookup
             var resolvedKey = urlsWithKeys[url];
+            Debug.Log($"[RuntimeAtlas.DownloadAndAddAsync] Resolved key: '{resolvedKey}'");
+            
             var versions = version != 0 ? new Dictionary<string, int> { [resolvedKey] = version } : null;
 
+            Debug.Log($"[RuntimeAtlas.DownloadAndAddAsync] Calling DownloadAndAddBatchAsync with 1 item...");
+            Debug.Log($"[RuntimeAtlas.DownloadAndAddAsync] Memory before batch call: {System.GC.GetTotalMemory(false) / (1024 * 1024)}MB");
+            
             var results = await DownloadAndAddBatchAsync(urlsWithKeys, versions, maxConcurrentDownloads: 1, cancellationToken);
             
-            return results.Values.FirstOrDefault();
+            Debug.Log($"[RuntimeAtlas.DownloadAndAddAsync] Batch call completed, processing results...");
+            Debug.Log($"[RuntimeAtlas.DownloadAndAddAsync] Results count: {results.Count}");
+            Debug.Log($"[RuntimeAtlas.DownloadAndAddAsync] Memory after batch call: {System.GC.GetTotalMemory(false) / (1024 * 1024)}MB");
+            
+            var result = results.Values.FirstOrDefault();
+            
+            if (result != null && result.IsValid)
+            {
+                Debug.Log($"[RuntimeAtlas.DownloadAndAddAsync] ✓ SUCCESS - Entry ID: {result.Id}, Name: '{result.Name}'");
+            }
+            else
+            {
+                Debug.LogWarning($"[RuntimeAtlas.DownloadAndAddAsync] ✗ FAILED - No valid entry returned");
+            }
+            
+            Debug.Log($"[RuntimeAtlas.DownloadAndAddAsync] ========== END SINGLE DOWNLOAD ==========");
+            return result;
         }
         
         /// <summary>
@@ -1601,9 +1626,11 @@ namespace RuntimeAtlasPacker
         {
             if (texture == null)
             {
+                Debug.LogWarning("[RuntimeAtlas.AddInternal] NULL texture provided");
                 return (AddResult.InvalidTexture, null);
             }
 
+            Debug.Log($"[RuntimeAtlas.AddInternal] START - texture: '{texture.name}', size: {texture.width}x{texture.height}, format: {texture.format}, version: {spriteVersion}");
 
             var width = texture.width + _settings.Padding * 2;
             var height = texture.height + _settings.Padding * 2;
@@ -1611,18 +1638,18 @@ namespace RuntimeAtlasPacker
             // Check if texture is too large to ever fit
             if (texture.width > _settings.MaxSize || texture.height > _settings.MaxSize)
             {
-#if UNITY_EDITOR
                 Debug.LogError($"[RuntimeAtlas.AddInternal] Texture '{texture.name}' ({texture.width}x{texture.height}) exceeds MaxSize ({_settings.MaxSize})");
-#endif
                 return (AddResult.TooLarge, null);
             }
 
+            Debug.Log($"[RuntimeAtlas.AddInternal] Attempting to pack '{texture.name}' in current page {_currentPageIndex}");
             // Try to pack in current page first
             var pageIndex = _currentPageIndex;
             var packed = TryPackInPage(pageIndex, width, height, out var packedRect);
             
             if (!packed)
             {
+                Debug.Log($"[RuntimeAtlas.AddInternal] Failed to pack in current page, trying all existing pages...");
                 // Try all existing pages before creating a new one
                 for (var i = 0; i < _textures.Count; i++)
                 {
@@ -1635,6 +1662,7 @@ namespace RuntimeAtlasPacker
                     {
                         packed = true;
                         pageIndex = i;
+                        Debug.Log($"[RuntimeAtlas.AddInternal] Successfully packed in page {pageIndex}");
                         break;
                     }
                 }
@@ -1647,12 +1675,11 @@ namespace RuntimeAtlasPacker
                     
                     if (!canCreatePage)
                     {
-#if UNITY_EDITOR
                         Debug.LogError($"[RuntimeAtlas.AddInternal] Cannot add texture '{texture.name}': Atlas has reached maximum page limit ({_settings.MaxPageCount} pages) and all pages are full!");
-#endif
                         return (AddResult.Full, null);
                     }
                     
+                    Debug.Log($"[RuntimeAtlas.AddInternal] Creating new page for '{texture.name}'");
                     // Create new page
                     CreateNewPage();
                     pageIndex = _currentPageIndex;
@@ -1662,11 +1689,10 @@ namespace RuntimeAtlasPacker
                     
                     if (!packed)
                     {
-#if UNITY_EDITOR
                         Debug.LogError($"[RuntimeAtlas.AddInternal] Failed to pack '{texture.name}' even in new page! This should not happen.");
-#endif
                         return (AddResult.Full, null);
                     }
+                    Debug.Log($"[RuntimeAtlas.AddInternal] Successfully packed in new page {pageIndex}");
                 }
             }
 
@@ -1680,16 +1706,23 @@ namespace RuntimeAtlasPacker
                 texture.height
             );
 
+            Debug.Log($"[RuntimeAtlas.AddInternal] Packed rect for '{texture.name}': page={pageIndex}, pos=({contentRect.x},{contentRect.y}), size=({contentRect.width},{contentRect.height})");
+            Debug.Log($"[RuntimeAtlas.AddInternal] About to blit '{texture.name}' to page {pageIndex} at ({contentRect.x},{contentRect.y})");
+            Debug.Log($"[RuntimeAtlas.AddInternal] Source texture - Name: '{texture.name}', Size: {texture.width}x{texture.height}, Format: {texture.format}, Readable: {texture.isReadable}");
+            Debug.Log($"[RuntimeAtlas.AddInternal] Target texture - Name: '{currentTexture.name}', Size: {currentTexture.width}x{currentTexture.height}, Format: {currentTexture.format}, Readable: {currentTexture.isReadable}");
+            Debug.Log($"[RuntimeAtlas.AddInternal] Memory before blit: {System.GC.GetTotalMemory(false) / (1024 * 1024)}MB");
+
             // Blit texture to atlas page
             try
             {
                 TextureBlitter.Blit(texture, currentTexture, contentRect.x, contentRect.y);
+                Debug.Log($"[RuntimeAtlas.AddInternal] ✓ Blit successful for '{texture.name}'");
+                Debug.Log($"[RuntimeAtlas.AddInternal] Memory after blit: {System.GC.GetTotalMemory(false) / (1024 * 1024)}MB");
             }
             catch (Exception ex)
             {
-#if UNITY_EDITOR
-                Debug.LogError($"[RuntimeAtlas.AddInternal] BLIT FAILED for '{texture.name}': {ex.Message}");
-#endif
+                Debug.LogError($"[RuntimeAtlas.AddInternal] ✗ BLIT FAILED for '{texture.name}': {ex.GetType().Name} - {ex.Message}");
+                Debug.LogError($"[RuntimeAtlas.AddInternal] Stack trace: {ex.StackTrace}");
                 return (AddResult.Failed, null);
             }
             
@@ -1702,9 +1735,12 @@ namespace RuntimeAtlasPacker
             );
 
             // Create entry with texture index
+            Debug.Log($"[RuntimeAtlas.AddInternal] Creating atlas entry for '{texture.name}'");
             var id = GetNextId();
             var entry = new AtlasEntry(this, id, pageIndex, contentRect, uvRect, texture.name, default, default, 100f, spriteVersion);
             _entries[id] = entry;
+            
+            Debug.Log($"[RuntimeAtlas.AddInternal] Entry created: ID={id}, page={pageIndex}, name='{texture.name}'");
             
             _version++;
             _isDirty = true;
@@ -1713,9 +1749,11 @@ namespace RuntimeAtlasPacker
             // Auto-repack if enabled
             if (_settings.RepackOnAdd)
             {
+                Debug.Log($"[RuntimeAtlas.AddInternal] Repacking page {pageIndex}");
                 RepackPage(pageIndex);
             }
 
+            Debug.Log($"[RuntimeAtlas.AddInternal] ✓ COMPLETE for '{texture.name}' - Entry ID: {id}");
             return (AddResult.Success, entry);
         }
 
