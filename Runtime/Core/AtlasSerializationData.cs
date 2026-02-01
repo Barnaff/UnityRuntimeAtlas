@@ -43,6 +43,7 @@ namespace RuntimeAtlasPacker
         public FilterMode FilterMode;
         public bool GenerateMipMaps;
         public bool Readable;
+        public bool UseRenderTextures;
         public GrowthStrategy GrowthStrategy;
         public PackingAlgorithm Algorithm;
         public bool RepackOnAdd;
@@ -60,6 +61,7 @@ namespace RuntimeAtlasPacker
                 FilterMode = settings.FilterMode,
                 GenerateMipMaps = settings.GenerateMipMaps,
                 Readable = settings.Readable,
+                UseRenderTextures = settings.UseRenderTextures,
                 GrowthStrategy = settings.GrowthStrategy,
                 Algorithm = settings.Algorithm,
                 RepackOnAdd = settings.RepackOnAdd,
@@ -79,6 +81,7 @@ namespace RuntimeAtlasPacker
                 FilterMode = FilterMode,
                 GenerateMipMaps = GenerateMipMaps,
                 Readable = Readable,
+                UseRenderTextures = UseRenderTextures,
                 GrowthStrategy = GrowthStrategy,
                 Algorithm = Algorithm,
                 RepackOnAdd = RepackOnAdd,

@@ -33,6 +33,15 @@ namespace RuntimeAtlasPacker
         /// </summary>
         public bool Readable;
         
+        /// <summary>
+        /// Whether to use RenderTexture for clearing and blitting operations.
+        /// When true: Uses GPU-accelerated RenderTexture operations (better for large textures, non-readable textures).
+        /// When false: Uses direct CPU pixel operations (better for small textures, debugging).
+        /// Default: true for better performance and mobile compatibility.
+        /// Note: Must be true when Readable is false.
+        /// </summary>
+        public bool UseRenderTextures;
+        
         /// <summary>Growth strategy when atlas is full.</summary>
         public GrowthStrategy GrowthStrategy;
         
@@ -57,6 +66,7 @@ namespace RuntimeAtlasPacker
             FilterMode = FilterMode.Bilinear,
             GenerateMipMaps = false,
             Readable = true,  // ✅ Safe default - set to false for mobile to save memory
+            UseRenderTextures = true,  // ✅ Use GPU-accelerated operations by default
             GrowthStrategy = GrowthStrategy.Double,
             Algorithm = PackingAlgorithm.MaxRects,
             MaxPageCount = -1, // Unlimited pages by default
@@ -73,6 +83,7 @@ namespace RuntimeAtlasPacker
             FilterMode = FilterMode.Bilinear,
             GenerateMipMaps = false,
             Readable = false,  // ✅ Memory optimized - saves 50% memory on mobile
+            UseRenderTextures = true,  // ✅ Required when Readable is false
             GrowthStrategy = GrowthStrategy.Double,
             Algorithm = PackingAlgorithm.Skyline,
             EnableSpriteCache = true
@@ -87,6 +98,7 @@ namespace RuntimeAtlasPacker
             FilterMode = FilterMode.Trilinear,
             GenerateMipMaps = true,
             Readable = true,  // ✅ High quality preset - readable for flexibility
+            UseRenderTextures = true,  // ✅ Use GPU-accelerated operations
             GrowthStrategy = GrowthStrategy.Double,
             Algorithm = PackingAlgorithm.MaxRects,
             EnableSpriteCache = true

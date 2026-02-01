@@ -725,6 +725,24 @@ namespace RuntimeAtlasPacker.Editor
             EditorGUILayout.LabelField($"Version: {_selectedAtlas.Version}");
             EditorGUILayout.LabelField($"Format: {_selectedAtlas.Settings.Format}");
             EditorGUILayout.LabelField($"Algorithm: {_selectedAtlas.Settings.Algorithm}");
+            
+            // Show Readable and UseRenderTextures settings
+            EditorGUILayout.BeginHorizontal();
+            EditorGUILayout.LabelField("Readable:", GUILayout.Width(100));
+            var readableColor = _selectedAtlas.Settings.Readable ? Color.green : new Color(1f, 0.5f, 0f); // Orange for non-readable
+            GUI.color = readableColor;
+            EditorGUILayout.LabelField(_selectedAtlas.Settings.Readable ? "Yes" : "No (Memory Optimized)");
+            GUI.color = oldColor;
+            EditorGUILayout.EndHorizontal();
+            
+            EditorGUILayout.BeginHorizontal();
+            EditorGUILayout.LabelField("Use RenderTextures:", GUILayout.Width(100));
+            var rtColor = _selectedAtlas.Settings.UseRenderTextures ? Color.green : Color.cyan;
+            GUI.color = rtColor;
+            EditorGUILayout.LabelField(_selectedAtlas.Settings.UseRenderTextures ? "Yes (GPU)" : "No (CPU)");
+            GUI.color = oldColor;
+            EditorGUILayout.EndHorizontal();
+            
             EditorGUILayout.EndVertical();
             
             EditorGUILayout.Space(5);
@@ -1963,6 +1981,7 @@ namespace RuntimeAtlasPacker.Editor
                     EditorGUILayout.LabelField($"Format: {info.Data.Settings.Format}");
                     EditorGUILayout.LabelField($"Algorithm: {info.Data.Settings.Algorithm}");
                     EditorGUILayout.LabelField($"Readable: {info.Data.Settings.Readable}");
+                    EditorGUILayout.LabelField($"Use RenderTextures: {info.Data.Settings.UseRenderTextures}");
                     EditorGUILayout.LabelField($"Mipmaps: {info.Data.Settings.GenerateMipMaps}");
                     EditorGUI.indentLevel--;
                 }

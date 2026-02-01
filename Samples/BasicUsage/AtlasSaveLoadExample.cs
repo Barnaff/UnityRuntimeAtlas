@@ -366,7 +366,8 @@ namespace RuntimeAtlasPacker.Samples
                 GrowthStrategy = GrowthStrategy.Double,
                 Algorithm = PackingAlgorithm.MaxRects,
                 RepackOnAdd = false,
-                EnableSpriteCache = true
+                EnableSpriteCache = true,
+                UseRenderTextures = true
             };
 
             _atlas = new RuntimeAtlas(settings);

@@ -140,6 +140,13 @@ namespace RuntimeAtlasPacker
 #endif
             }
             
+            // Validate UseRenderTextures setting
+            if (!settings.Readable && !settings.UseRenderTextures)
+            {
+                Debug.LogWarning("[RuntimeAtlas] UseRenderTextures must be true when Readable is false. Forcing UseRenderTextures = true.");
+                settings.UseRenderTextures = true;
+            }
+            
             _settings = settings;
             _entries = new Dictionary<int, AtlasEntry>(64);
             _entriesByName = new Dictionary<string, AtlasEntry>(64);
@@ -252,57 +259,77 @@ namespace RuntimeAtlasPacker
             texture.wrapMode = TextureWrapMode.Clamp;
             texture.name = $"RuntimeAtlas_Page{pageIndex}";
             
-#if UNITY_EDITOR || UNITY_IOS
-            Debug.Log($"[RuntimeAtlas.CreateNewPage] Texture2D created. Clearing with RenderTexture...");
-#endif
-            
-            // ✅ MEMORY OPTIMIZATION: Use RenderTexture to clear instead of allocating large Color32 array
-            // This avoids a large CPU memory allocation (e.g., 4096x4096x4 = 64MB)
-            if (_settings.InitialSize > 0) // Ensure valid size
+            // Clear texture based on UseRenderTextures setting
+            if (_settings.UseRenderTextures)
             {
-                RenderTexture rt = null;
-                try
-                {
-                    rt = RenderTexture.GetTemporary(_settings.InitialSize, _settings.InitialSize, 0, RenderTextureFormat.ARGB32);
-                    var prev = RenderTexture.active;
-                    RenderTexture.active = rt;
-                    GL.Clear(true, true, Color.clear);
-                    RenderTexture.active = prev;
-                    
-                    if (texture.isReadable)
-                    {
 #if UNITY_EDITOR || UNITY_IOS
-                        Debug.Log($"[RuntimeAtlas.CreateNewPage] Using ReadPixels for readable texture...");
+                Debug.Log($"[RuntimeAtlas.CreateNewPage] Clearing texture with RenderTexture (GPU-accelerated)...");
 #endif
-                        // For readable textures, use ReadPixels
+                // ✅ MEMORY OPTIMIZATION: Use RenderTexture to clear instead of allocating large Color32 array
+                // This avoids a large CPU memory allocation (e.g., 4096x4096x4 = 64MB)
+                if (_settings.InitialSize > 0) // Ensure valid size
+                {
+                    RenderTexture rt = null;
+                    try
+                    {
+                        rt = RenderTexture.GetTemporary(_settings.InitialSize, _settings.InitialSize, 0, RenderTextureFormat.ARGB32);
+                        var prev = RenderTexture.active;
                         RenderTexture.active = rt;
-                        texture.ReadPixels(new Rect(0, 0, _settings.InitialSize, _settings.InitialSize), 0, 0, false);
+                        GL.Clear(true, true, Color.clear);
                         RenderTexture.active = prev;
-                        texture.Apply(false, false);
+                        
+                        if (texture.isReadable)
+                        {
+#if UNITY_EDITOR || UNITY_IOS
+                            Debug.Log($"[RuntimeAtlas.CreateNewPage] Using ReadPixels for readable texture...");
+#endif
+                            // For readable textures, use ReadPixels
+                            RenderTexture.active = rt;
+                            texture.ReadPixels(new Rect(0, 0, _settings.InitialSize, _settings.InitialSize), 0, 0, false);
+                            RenderTexture.active = prev;
+                            texture.Apply(false, false);
+                        }
+                        else
+                        {
+#if UNITY_EDITOR || UNITY_IOS
+                            Debug.Log($"[RuntimeAtlas.CreateNewPage] Using Graphics.CopyTexture for non-readable texture...");
+#endif
+                            // For non-readable textures, use Graphics.CopyTexture
+                            Graphics.CopyTexture(rt, texture);
+                        }
                     }
-                    else
+                    catch (Exception ex)
                     {
 #if UNITY_EDITOR || UNITY_IOS
-                        Debug.Log($"[RuntimeAtlas.CreateNewPage] Using Graphics.CopyTexture for non-readable texture...");
+                        Debug.LogError($"[RuntimeAtlas.CreateNewPage] ✗ CRASH during RenderTexture clearing: {ex.Message}\nStack: {ex.StackTrace}");
 #endif
-                        // For non-readable textures, use Graphics.CopyTexture
-                        Graphics.CopyTexture(rt, texture);
+                        throw;
                     }
-                }
-                catch (Exception ex)
-                {
-#if UNITY_EDITOR || UNITY_IOS
-                    Debug.LogError($"[RuntimeAtlas.CreateNewPage] ✗ CRASH during texture clearing: {ex.Message}\nStack: {ex.StackTrace}");
-#endif
-                    throw;
-                }
-                finally
-                {
-                    if (rt != null)
+                    finally
                     {
-                        RenderTexture.ReleaseTemporary(rt);
+                        if (rt != null)
+                        {
+                            RenderTexture.ReleaseTemporary(rt);
+                        }
                     }
                 }
+            }
+            else
+            {
+#if UNITY_EDITOR
+                Debug.Log($"[RuntimeAtlas.CreateNewPage] Clearing texture with direct pixel operations (CPU)...");
+#endif
+                // Direct CPU pixel operations - only works with readable textures
+                if (!texture.isReadable)
+                {
+                    Debug.LogError($"[RuntimeAtlas.CreateNewPage] Cannot use direct pixel operations on non-readable texture! UseRenderTextures must be true when Readable is false.");
+                    throw new System.InvalidOperationException("Cannot use direct pixel operations on non-readable texture.");
+                }
+                
+                var clearPixels = new Color32[_settings.InitialSize * _settings.InitialSize];
+                // clearPixels is already initialized to all zeros (transparent black)
+                texture.SetPixels32(clearPixels);
+                texture.Apply(false, false);
             }
             
             _textures.Add(texture);
