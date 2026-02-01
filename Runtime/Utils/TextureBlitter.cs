@@ -245,6 +245,16 @@ namespace RuntimeAtlasPacker
                         // Apply immediately to upload to GPU
                         target.Apply(false, false);
                         Debug.Log($"[TextureBlitter.BatchBlit] Apply completed successfully");
+
+#if UNITY_IOS
+                        // ✅ iOS CRITICAL FIX: Force GPU to complete all pending texture uploads
+                        // On iOS Metal, Apply() schedules a DEFERRED upload. If we return immediately,
+                        // another operation (like atlas save) might access the texture before upload completes.
+                        // GL.Flush() forces all pending GPU operations to complete.
+                        Debug.Log($"[TextureBlitter.BatchBlit] iOS: Forcing GPU flush to complete texture upload...");
+                        GL.Flush();
+                        Debug.Log($"[TextureBlitter.BatchBlit] iOS: GPU flush complete");
+#endif
                     }
                     catch (System.Exception applyEx)
                     {
@@ -262,6 +272,13 @@ namespace RuntimeAtlasPacker
                         // For NON-READABLE textures: Use Graphics.CopyTexture (GPU-only)
                         Graphics.CopyTexture(rt, target);
                         Debug.Log($"[TextureBlitter.BatchBlit] CopyTexture completed successfully");
+
+#if UNITY_IOS
+                        // ✅ iOS CRITICAL FIX: Force GPU to complete the copy operation
+                        Debug.Log($"[TextureBlitter.BatchBlit] iOS: Forcing GPU flush after CopyTexture...");
+                        GL.Flush();
+                        Debug.Log($"[TextureBlitter.BatchBlit] iOS: GPU flush complete");
+#endif
                     }
                     catch (System.Exception copyEx)
                     {
@@ -441,6 +458,16 @@ namespace RuntimeAtlasPacker
                         // Without this, the texture changes won't be visible!
                         target.Apply(false, false); // updateMipmaps=false, makeNoLongerReadable=false
                         Debug.Log($"[TextureBlitter.BlitWithMaterial] Apply completed");
+
+#if UNITY_IOS
+                        // ✅ iOS CRITICAL FIX: Force GPU to complete all pending texture uploads
+                        // On iOS Metal, Apply() schedules a DEFERRED upload. If we return immediately,
+                        // another operation (like atlas save) might access the texture before upload completes.
+                        // GL.Flush() forces all pending GPU operations to complete.
+                        Debug.Log($"[TextureBlitter.BlitWithMaterial] iOS: Forcing GPU flush...");
+                        GL.Flush();
+                        Debug.Log($"[TextureBlitter.BlitWithMaterial] iOS: GPU flush complete");
+#endif
                     }
                     catch (System.Exception applyEx)
                     {
@@ -458,6 +485,13 @@ namespace RuntimeAtlasPacker
                         // For NON-READABLE textures: Use Graphics.CopyTexture (GPU-only)
                         Graphics.CopyTexture(rt, target);
                         Debug.Log($"[TextureBlitter.BlitWithMaterial] CopyTexture completed");
+
+#if UNITY_IOS
+                        // ✅ iOS CRITICAL FIX: Force GPU to complete the copy operation
+                        Debug.Log($"[TextureBlitter.BlitWithMaterial] iOS: Forcing GPU flush...");
+                        GL.Flush();
+                        Debug.Log($"[TextureBlitter.BlitWithMaterial] iOS: GPU flush complete");
+#endif
                     }
                     catch (System.Exception copyEx)
                     {
