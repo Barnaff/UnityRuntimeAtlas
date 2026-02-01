@@ -153,18 +153,49 @@ namespace RuntimeAtlasPacker.Samples
         {
             try
             {
-                using var request = UnityWebRequestTexture.GetTexture(url);
-                var operation = request.SendWebRequest();
-
-                while (!operation.isDone)
+                // ✅ IMPROVED: Use UnityWebRequest with DownloadHandlerBuffer for better texture lifecycle control
+                var request = new UnityWebRequest(url, UnityWebRequest.kHttpVerbGET);
+                request.downloadHandler = new DownloadHandlerBuffer();
+                
+                try
                 {
-                    ct.ThrowIfCancellationRequested();
-                    await Task.Yield();
+                    var operation = request.SendWebRequest();
+
+                    while (!operation.isDone)
+                    {
+                        ct.ThrowIfCancellationRequested();
+                        await Task.Yield();
+                    }
+
+                    if (request.result == UnityWebRequest.Result.Success)
+                    {
+                        // Get raw image bytes
+                        byte[] imageData = request.downloadHandler.data;
+                        
+                        if (imageData != null && imageData.Length > 0)
+                        {
+                            // Create texture and load image data
+                            var texture = new Texture2D(2, 2, TextureFormat.RGBA32, false);
+                            
+                            if (texture.LoadImage(imageData))
+                            {
+                                return texture;
+                            }
+                            else
+                            {
+                                Destroy(texture);
+                                Debug.LogWarning("Failed to load image data");
+                            }
+                        }
+                        else
+                        {
+                            Debug.LogWarning("Downloaded data is empty");
+                        }
+                    }
                 }
-
-                if (request.result == UnityWebRequest.Result.Success)
+                finally
                 {
-                    return DownloadHandlerTexture.GetContent(request);
+                    request?.Dispose();
                 }
             }
             catch (OperationCanceledException)

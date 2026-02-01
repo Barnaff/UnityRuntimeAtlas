@@ -162,31 +162,51 @@ public class SimpleNamedAtlasExample : MonoBehaviour
             
             Debug.Log($"Downloading {imageName} from: {url}");
             
-            // Download image
-            UnityWebRequest request = UnityWebRequestTexture.GetTexture(url);
+            // ✅ IMPROVED: Download image using UnityWebRequest with DownloadHandlerBuffer
+            UnityWebRequest request = new UnityWebRequest(url, UnityWebRequest.kHttpVerbGET);
+            request.downloadHandler = new DownloadHandlerBuffer();
             yield return request.SendWebRequest();
             
             if (request.result == UnityWebRequest.Result.Success)
             {
-                Texture2D downloadedTexture = DownloadHandlerTexture.GetContent(request);
-                downloadedTexture.name = imageName;
+                // Get raw image bytes
+                byte[] imageData = request.downloadHandler.data;
                 
-                // Store the downloaded texture
-                downloadedImages[imageName] = downloadedTexture;
-                
-                // Add to atlas with name
-                var (result, entry) = atlas.Add(imageName, downloadedTexture);
-                
-                if (result == AddResult.Success)
+                if (imageData != null && imageData.Length > 0)
                 {
-                    Debug.Log($"✓ Added '{imageName}' to atlas (Entry ID: {entry.Id})");
+                    // Create texture and load image data
+                    Texture2D downloadedTexture = new Texture2D(2, 2, TextureFormat.RGBA32, false);
+                    downloadedTexture.name = imageName;
                     
-                    // Create button for this image
-                    CreateButtonForImage(imageName);
+                    if (downloadedTexture.LoadImage(imageData))
+                    {
+                        // Store the downloaded texture
+                        downloadedImages[imageName] = downloadedTexture;
+                        
+                        // Add to atlas with name
+                        var (result, entry) = atlas.Add(imageName, downloadedTexture);
+                        
+                        if (result == AddResult.Success)
+                        {
+                            Debug.Log($"✓ Added '{imageName}' to atlas (Entry ID: {entry.Id})");
+                            
+                            // Create button for this image
+                            CreateButtonForImage(imageName);
+                        }
+                        else
+                        {
+                            Debug.LogError($"✗ Failed to add '{imageName}' to atlas: {result}");
+                        }
+                    }
+                    else
+                    {
+                        Debug.LogError($"✗ Failed to load image data for '{imageName}'");
+                        Destroy(downloadedTexture);
+                    }
                 }
                 else
                 {
-                    Debug.LogError($"✗ Failed to add '{imageName}' to atlas: {result}");
+                    Debug.LogError($"✗ Downloaded data is empty for '{imageName}'");
                 }
             }
             else

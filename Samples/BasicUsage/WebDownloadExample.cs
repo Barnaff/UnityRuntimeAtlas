@@ -412,36 +412,62 @@ namespace RuntimeAtlasPacker.Samples
             
             try
             {
-                using var request = UnityWebRequestTexture.GetTexture(url);
+                // ✅ IMPROVED: Use UnityWebRequest with DownloadHandlerBuffer for better texture lifecycle control
+                var request = new UnityWebRequest(url, UnityWebRequest.kHttpVerbGET);
+                request.downloadHandler = new DownloadHandlerBuffer();
                 
-                Debug.Log($"[WebDownload] DownloadImageAsync: Sending web request...");
-                var operation = request.SendWebRequest();
-                
-                while (!operation.isDone)
+                try
                 {
-                    if (ct.IsCancellationRequested)
+                    Debug.Log($"[WebDownload] DownloadImageAsync: Sending web request...");
+                    var operation = request.SendWebRequest();
+                    
+                    while (!operation.isDone)
                     {
-                        Debug.LogWarning($"[WebDownload] DownloadImageAsync: Cancelled");
-                        request.Abort();
+                        if (ct.IsCancellationRequested)
+                        {
+                            Debug.LogWarning($"[WebDownload] DownloadImageAsync: Cancelled");
+                            request.Abort();
+                            return null;
+                        }
+                        await Task.Yield();
+                    }
+
+                    Debug.Log($"[WebDownload] DownloadImageAsync: Request complete. Result: {request.result}");
+
+                    if (request.result != UnityWebRequest.Result.Success)
+                    {
+                        Debug.LogWarning($"[WebDownload] Failed to download {url}: {request.error}");
                         return null;
                     }
-                    await Task.Yield();
+
+                    // Get raw image bytes
+                    byte[] imageData = request.downloadHandler.data;
+                    
+                    if (imageData == null || imageData.Length == 0)
+                    {
+                        Debug.LogWarning($"[WebDownload] Downloaded data is empty for {url}");
+                        return null;
+                    }
+
+                    // Create texture and load image data
+                    var texture = new Texture2D(2, 2, TextureFormat.RGBA32, false);
+                    texture.name = $"WebImage_{url.GetHashCode():X8}";
+                    
+                    if (!texture.LoadImage(imageData))
+                    {
+                        Debug.LogError($"[WebDownload] Failed to load image data for {url}");
+                        Destroy(texture);
+                        return null;
+                    }
+                    
+                    Debug.Log($"[WebDownload] DownloadImageAsync: SUCCESS - Texture: {texture.name}, Size: {texture.width}x{texture.height}");
+                    
+                    return texture;
                 }
-
-                Debug.Log($"[WebDownload] DownloadImageAsync: Request complete. Result: {request.result}");
-
-                if (request.result != UnityWebRequest.Result.Success)
+                finally
                 {
-                    Debug.LogWarning($"[WebDownload] Failed to download {url}: {request.error}");
-                    return null;
+                    request?.Dispose();
                 }
-
-                var texture = DownloadHandlerTexture.GetContent(request);
-                texture.name = $"WebImage_{url.GetHashCode():X8}";
-                
-                Debug.Log($"[WebDownload] DownloadImageAsync: SUCCESS - Texture: {texture.name}, Size: {texture.width}x{texture.height}");
-                
-                return texture;
             }
             catch (Exception e)
             {

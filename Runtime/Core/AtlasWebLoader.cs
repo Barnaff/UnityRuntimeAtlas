@@ -330,7 +330,12 @@ namespace RuntimeAtlasPacker
             
             try
             {
-                using (var request = UnityWebRequestTexture.GetTexture(url))
+                // ✅ IMPROVED: Use UnityWebRequest with DownloadHandlerBuffer for better texture lifecycle control
+                // This gives us more control over texture creation and memory management
+                var request = new UnityWebRequest(url, UnityWebRequest.kHttpVerbGET);
+                request.downloadHandler = new DownloadHandlerBuffer();
+                
+                try
                 {
                     var operation = request.SendWebRequest();
 
@@ -348,8 +353,31 @@ namespace RuntimeAtlasPacker
 
                     if (request.result == UnityWebRequest.Result.Success)
                     {
-                        downloadedTexture = DownloadHandlerTexture.GetContent(request);
+                        // Get raw image bytes
+                        byte[] imageData = request.downloadHandler.data;
+                        
+                        if (imageData == null || imageData.Length == 0)
+                        {
+                            Debug.LogWarning($"[AtlasWebLoader] Downloaded data is empty for {url}");
+                            return (name, null);
+                        }
+
+#if UNITY_IOS
+                        // ✅ iOS: Always use RGBA32 to prevent SIMD conversion crashes
+                        downloadedTexture = new Texture2D(2, 2, TextureFormat.RGBA32, false);
+#else
+                        // Create minimal texture - LoadImage will resize it
+                        downloadedTexture = new Texture2D(2, 2, TextureFormat.RGBA32, false);
+#endif
                         downloadedTexture.name = name;
+                        
+                        // Load image data - this gives us full control over the texture
+                        if (!downloadedTexture.LoadImage(imageData))
+                        {
+                            Debug.LogError($"[AtlasWebLoader] Failed to load image data for {url}");
+                            UnityEngine.Object.Destroy(downloadedTexture);
+                            return (name, null);
+                        }
                         
                         // Return texture - caller is responsible for cleanup
                         var result = (name, downloadedTexture);
@@ -361,6 +389,11 @@ namespace RuntimeAtlasPacker
                         Debug.LogWarning($"[AtlasWebLoader] Failed to download {url}: {request.error}");
                         return (name, null);
                     }
+                }
+                finally
+                {
+                    // Dispose UnityWebRequest and its handlers
+                    request?.Dispose();
                 }
             }
             catch (Exception ex)
@@ -384,8 +417,12 @@ namespace RuntimeAtlasPacker
             
             try
             {
-                // Download texture
-                using (var webRequest = UnityWebRequestTexture.GetTexture(request.Url))
+                // ✅ IMPROVED: Use UnityWebRequest with DownloadHandlerBuffer for better texture lifecycle control
+                // This gives us more control over texture creation and memory management
+                var webRequest = new UnityWebRequest(request.Url, UnityWebRequest.kHttpVerbGET);
+                webRequest.downloadHandler = new DownloadHandlerBuffer();
+                
+                try
                 {
                     var operation = webRequest.SendWebRequest();
 
@@ -405,8 +442,33 @@ namespace RuntimeAtlasPacker
 
                     if (webRequest.result == UnityWebRequest.Result.Success)
                     {
-                        downloadedTexture = DownloadHandlerTexture.GetContent(webRequest);
+                        // Get raw image bytes
+                        byte[] imageData = webRequest.downloadHandler.data;
+                        
+                        if (imageData == null || imageData.Length == 0)
+                        {
+                            request.SetFailed("Downloaded data is empty");
+                            OnDownloadFailed?.Invoke(request.Url, "Empty data");
+                            return;
+                        }
+
+#if UNITY_IOS
+                        // ✅ iOS: Always use RGBA32 to prevent SIMD conversion crashes
+                        downloadedTexture = new Texture2D(2, 2, TextureFormat.RGBA32, false);
+#else
+                        // Create minimal texture - LoadImage will resize it
+                        downloadedTexture = new Texture2D(2, 2, TextureFormat.RGBA32, false);
+#endif
                         downloadedTexture.name = request.SpriteName;
+                        
+                        // Load image data - this gives us full control over the texture
+                        if (!downloadedTexture.LoadImage(imageData))
+                        {
+                            request.SetFailed("Failed to load image data");
+                            OnDownloadFailed?.Invoke(request.Url, "LoadImage failed");
+                            UnityEngine.Object.Destroy(downloadedTexture);
+                            return;
+                        }
 
                         // Add to atlas
                         var (result, entry) = _atlas.Add(request.SpriteName, downloadedTexture);
@@ -444,6 +506,11 @@ namespace RuntimeAtlasPacker
                         request.SetFailed(webRequest.error);
                         OnDownloadFailed?.Invoke(request.Url, webRequest.error);
                     }
+                }
+                finally
+                {
+                    // Dispose UnityWebRequest and its handlers
+                    webRequest?.Dispose();
                 }
             }
             catch (Exception ex)
