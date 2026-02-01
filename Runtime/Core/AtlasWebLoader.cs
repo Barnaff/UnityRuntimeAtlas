@@ -330,8 +330,6 @@ namespace RuntimeAtlasPacker
             
             try
             {
-                // ✅ IMPROVED: Use UnityWebRequest with DownloadHandlerBuffer for better texture lifecycle control
-                // This gives us more control over texture creation and memory management
                 var request = new UnityWebRequest(url, UnityWebRequest.kHttpVerbGET);
                 request.downloadHandler = new DownloadHandlerBuffer();
                 
@@ -362,16 +360,9 @@ namespace RuntimeAtlasPacker
                             return (name, null);
                         }
 
-#if UNITY_IOS
-                        // ✅ iOS: Always use RGBA32 to prevent SIMD conversion crashes
                         downloadedTexture = new Texture2D(2, 2, TextureFormat.RGBA32, false);
-#else
-                        // Create minimal texture - LoadImage will resize it
-                        downloadedTexture = new Texture2D(2, 2, TextureFormat.RGBA32, false);
-#endif
                         downloadedTexture.name = name;
                         
-                        // Load image data - this gives us full control over the texture
                         if (!downloadedTexture.LoadImage(imageData))
                         {
                             Debug.LogError($"[AtlasWebLoader] Failed to load image data for {url}");
@@ -417,8 +408,6 @@ namespace RuntimeAtlasPacker
             
             try
             {
-                // ✅ IMPROVED: Use UnityWebRequest with DownloadHandlerBuffer for better texture lifecycle control
-                // This gives us more control over texture creation and memory management
                 var webRequest = new UnityWebRequest(request.Url, UnityWebRequest.kHttpVerbGET);
                 webRequest.downloadHandler = new DownloadHandlerBuffer();
                 
@@ -452,16 +441,9 @@ namespace RuntimeAtlasPacker
                             return;
                         }
 
-#if UNITY_IOS
-                        // ✅ iOS: Always use RGBA32 to prevent SIMD conversion crashes
                         downloadedTexture = new Texture2D(2, 2, TextureFormat.RGBA32, false);
-#else
-                        // Create minimal texture - LoadImage will resize it
-                        downloadedTexture = new Texture2D(2, 2, TextureFormat.RGBA32, false);
-#endif
                         downloadedTexture.name = request.SpriteName;
                         
-                        // Load image data - this gives us full control over the texture
                         if (!downloadedTexture.LoadImage(imageData))
                         {
                             request.SetFailed("Failed to load image data");

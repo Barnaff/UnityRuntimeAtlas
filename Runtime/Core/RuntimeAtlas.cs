@@ -338,19 +338,6 @@ namespace RuntimeAtlasPacker
 #if UNITY_EDITOR
             Debug.Log($"[RuntimeAtlas.CreateNewPage] ✓ Page {pageIndex} created successfully. Total pages: {_textures.Count}, Memory after: {System.GC.GetTotalMemory(false) / 1024 / 1024} MB");
 #endif
-
-#if UNITY_IOS
-            // ✅ iOS MEMORY SAFETY: Force GC after creating new page to prevent memory crashes
-            // Each new page can be 16-64MB - iOS needs aggressive memory management
-            if (pageIndex > 0) // Skip for first page to avoid startup overhead
-            {
-                var memBefore = System.GC.GetTotalMemory(false) / 1024 / 1024;
-                System.GC.Collect();
-                System.GC.WaitForPendingFinalizers();
-                var memAfter = System.GC.GetTotalMemory(false) / 1024 / 1024;
-                Debug.Log($"[RuntimeAtlas.CreateNewPage] iOS: Forced GC after creating page {pageIndex}. Memory: {memBefore}MB → {memAfter}MB (freed {memBefore - memAfter}MB)");
-            }
-#endif
         }
 
         /// <summary>
@@ -1612,19 +1599,6 @@ namespace RuntimeAtlasPacker
                 return (AddResult.InvalidTexture, null);
             }
 
-#if UNITY_IOS
-            // ✅ iOS MEMORY SAFETY: Check memory before adding texture
-            // iOS has strict memory limits - prevent crashes by checking available memory
-            var memoryBeforeMB = System.GC.GetTotalMemory(false) / 1024 / 1024;
-            if (memoryBeforeMB > 500) // Threshold: 500MB
-            {
-                // Force GC to free up memory before proceeding
-                System.GC.Collect();
-                System.GC.WaitForPendingFinalizers();
-                var memoryAfterMB = System.GC.GetTotalMemory(false) / 1024 / 1024;
-                Debug.Log($"[RuntimeAtlas.AddInternal] iOS: High memory usage detected ({memoryBeforeMB}MB). Forced GC: {memoryBeforeMB}MB → {memoryAfterMB}MB");
-            }
-#endif
 
             var width = texture.width + _settings.Padding * 2;
             var height = texture.height + _settings.Padding * 2;
@@ -1730,14 +1704,6 @@ namespace RuntimeAtlasPacker
             _version++;
             _isDirty = true;
 
-#if UNITY_IOS
-            // ✅ iOS MEMORY SAFETY: Periodic cleanup after adding entries
-            // Prevent memory accumulation by cleaning up every 10 entries
-            if (_entries.Count % 10 == 0)
-            {
-                System.GC.Collect(0, GCCollectionMode.Optimized);
-            }
-#endif
 
             // Auto-repack if enabled
             if (_settings.RepackOnAdd)

@@ -272,7 +272,7 @@ namespace RuntimeAtlasPacker
 
                 Debug.Log($"[TextureBlitter.BatchBlit] ✓ BATCH BLIT COMPLETE");
                 MemoryDiagnostics.LogMemoryState("BatchBlit END");
-                Debug.Log($"[TextureBlitter.BatchBlit] ========== BATCH BLIT END ==========")
+                Debug.Log($"[TextureBlitter.BatchBlit] ========== BATCH BLIT END ==========");
 
 #if UNITY_IOS
                 // ✅ iOS MEMORY FIX: Force cleanup of temporary allocations after large operation

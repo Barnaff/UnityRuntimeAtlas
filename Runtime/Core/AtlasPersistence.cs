@@ -867,19 +867,11 @@ namespace RuntimeAtlasPacker
                     }
 #endif
 
-                    // Create texture from PNG data
-                    // ✅ CRITICAL FIX: Create as READABLE 
-                    // The 3rd parameter (mipChain) determines if mipmaps are generated
-                    // We do NOT pass a 5th parameter - Unity will create a readable texture by default
-                    // ✅ PLATFORM FIX: Always use RGBA32 when loading from PNG to avoid SIMD conversion issues
-                    // PNG files are naturally RGBA format, using RGBA32 prevents format conversion issues
-                    // This prevents crashes in RemapSIMDWithPermute on mobile platforms (iOS/Android)
                     var texture = new Texture2D(2, 2, TextureFormat.RGBA32, settings.GenerateMipMaps);
                     texture.filterMode = settings.FilterMode;
                     texture.wrapMode = TextureWrapMode.Clamp;
                     texture.name = $"RuntimeAtlas_Page{i}_Loaded";
 
-                    // ✅ LoadImage will resize the texture and load pixel data
                     if (!texture.LoadImage(pngData))
                     {
                         Debug.LogError($"[AtlasPersistence] LoadImage FAILED for page {i}");
@@ -890,7 +882,6 @@ namespace RuntimeAtlasPacker
 #if UNITY_EDITOR
                     Debug.Log($"[AtlasPersistence] LoadImage SUCCESS for page {i}: Size = {texture.width}x{texture.height}, Format = {texture.format}");
                     
-                    // Verify texture is readable before Apply
                     if (!texture.isReadable)
                     {
                         Debug.LogError($"[AtlasPersistence] ⚠️ Texture is non-readable after LoadImage!");
@@ -1056,19 +1047,11 @@ namespace RuntimeAtlasPacker
                     }
 #endif
 
-                    // Create texture from PNG data
-                    // ✅ CRITICAL FIX: Create as READABLE 
-                    // The 3rd parameter (mipChain) determines if mipmaps are generated
-                    // We do NOT pass a 5th parameter - Unity will create a readable texture by default
-                    // ✅ PLATFORM FIX: Always use RGBA32 when loading from PNG to avoid SIMD conversion issues
-                    // PNG files are naturally RGBA format, using RGBA32 prevents format conversion issues
-                    // This prevents crashes in RemapSIMDWithPermute on mobile platforms (iOS/Android)
                     var texture = new Texture2D(2, 2, TextureFormat.RGBA32, settings.GenerateMipMaps);
                     texture.filterMode = settings.FilterMode;
                     texture.wrapMode = TextureWrapMode.Clamp;
                     texture.name = $"RuntimeAtlas_Page{i}_Loaded";
 
-                    // ✅ LoadImage will resize the texture and load pixel data
                     if (!texture.LoadImage(pngData))
                     {
                         Debug.LogError($"[AtlasPersistence] LoadImage FAILED for page {i}");
@@ -1079,7 +1062,6 @@ namespace RuntimeAtlasPacker
 #if UNITY_EDITOR
                     Debug.Log($"[AtlasPersistence] LoadImage SUCCESS for page {i}: Size = {texture.width}x{texture.height}, Format = {texture.format}");
                     
-                    // Verify texture is readable before Apply
                     if (!texture.isReadable)
                     {
                         Debug.LogError($"[AtlasPersistence] ⚠️ Texture is non-readable after LoadImage!");
