@@ -330,10 +330,7 @@ namespace RuntimeAtlasPacker
             
             try
             {
-                var request = new UnityWebRequest(url, UnityWebRequest.kHttpVerbGET);
-                request.downloadHandler = new DownloadHandlerBuffer();
-                
-                try
+                using (var request = UnityWebRequestTexture.GetTexture(url))
                 {
                     var operation = request.SendWebRequest();
 
@@ -351,25 +348,33 @@ namespace RuntimeAtlasPacker
 
                     if (request.result == UnityWebRequest.Result.Success)
                     {
-                        // Get raw image bytes
-                        byte[] imageData = request.downloadHandler.data;
-                        
-                        if (imageData == null || imageData.Length == 0)
-                        {
-                            Debug.LogWarning($"[AtlasWebLoader] Downloaded data is empty for {url}");
-                            return (name, null);
-                        }
-
-                        downloadedTexture = new Texture2D(2, 2, TextureFormat.RGBA32, false);
+                        downloadedTexture = DownloadHandlerTexture.GetContent(request);
                         downloadedTexture.name = name;
-                        
-                        if (!downloadedTexture.LoadImage(imageData))
+
+#if UNITY_IOS
+                        // ✅ iOS CRITICAL FIX: Convert ARGB32 to RGBA32 to avoid Metal SIMD crash
+                        // DownloadHandlerTexture may return ARGB32 textures for PNG images
+                        // Metal's RemapSIMDWithPermute crashes when converting ARGB->RGBA during Apply()
+                        if (downloadedTexture.format == TextureFormat.ARGB32)
                         {
-                            Debug.LogError($"[AtlasWebLoader] Failed to load image data for {url}");
+                            Debug.Log($"[AtlasWebLoader] iOS: Converting downloaded texture '{name}' from ARGB32 to RGBA32...");
+
+                            var pixels = downloadedTexture.GetPixels32();
+                            var rgbaTexture = new Texture2D(downloadedTexture.width, downloadedTexture.height, TextureFormat.RGBA32, false);
+                            rgbaTexture.name = name;
+                            rgbaTexture.filterMode = downloadedTexture.filterMode;
+                            rgbaTexture.wrapMode = downloadedTexture.wrapMode;
+                            rgbaTexture.SetPixels32(pixels);
+                            rgbaTexture.Apply(false, false);
+
+                            // Destroy old texture and use converted one
                             UnityEngine.Object.Destroy(downloadedTexture);
-                            return (name, null);
+                            downloadedTexture = rgbaTexture;
+
+                            Debug.Log($"[AtlasWebLoader] iOS: Conversion complete. New format: {downloadedTexture.format}");
                         }
-                        
+#endif
+
                         // Return texture - caller is responsible for cleanup
                         var result = (name, downloadedTexture);
                         downloadedTexture = null; // Transfer ownership to caller
@@ -380,11 +385,6 @@ namespace RuntimeAtlasPacker
                         Debug.LogWarning($"[AtlasWebLoader] Failed to download {url}: {request.error}");
                         return (name, null);
                     }
-                }
-                finally
-                {
-                    // Dispose UnityWebRequest and its handlers
-                    request?.Dispose();
                 }
             }
             catch (Exception ex)
@@ -408,10 +408,8 @@ namespace RuntimeAtlasPacker
             
             try
             {
-                var webRequest = new UnityWebRequest(request.Url, UnityWebRequest.kHttpVerbGET);
-                webRequest.downloadHandler = new DownloadHandlerBuffer();
-                
-                try
+                // Download texture
+                using (var webRequest = UnityWebRequestTexture.GetTexture(request.Url))
                 {
                     var operation = webRequest.SendWebRequest();
 
@@ -431,26 +429,32 @@ namespace RuntimeAtlasPacker
 
                     if (webRequest.result == UnityWebRequest.Result.Success)
                     {
-                        // Get raw image bytes
-                        byte[] imageData = webRequest.downloadHandler.data;
-                        
-                        if (imageData == null || imageData.Length == 0)
-                        {
-                            request.SetFailed("Downloaded data is empty");
-                            OnDownloadFailed?.Invoke(request.Url, "Empty data");
-                            return;
-                        }
-
-                        downloadedTexture = new Texture2D(2, 2, TextureFormat.RGBA32, false);
+                        downloadedTexture = DownloadHandlerTexture.GetContent(webRequest);
                         downloadedTexture.name = request.SpriteName;
-                        
-                        if (!downloadedTexture.LoadImage(imageData))
+
+#if UNITY_IOS
+                        // ✅ iOS CRITICAL FIX: Convert ARGB32 to RGBA32 to avoid Metal SIMD crash
+                        // DownloadHandlerTexture may return ARGB32 textures for PNG images
+                        // Metal's RemapSIMDWithPermute crashes when converting ARGB->RGBA during Apply()
+                        if (downloadedTexture.format == TextureFormat.ARGB32)
                         {
-                            request.SetFailed("Failed to load image data");
-                            OnDownloadFailed?.Invoke(request.Url, "LoadImage failed");
+                            Debug.Log($"[AtlasWebLoader] iOS: Converting downloaded texture '{request.SpriteName}' from ARGB32 to RGBA32...");
+
+                            var pixels = downloadedTexture.GetPixels32();
+                            var rgbaTexture = new Texture2D(downloadedTexture.width, downloadedTexture.height, TextureFormat.RGBA32, false);
+                            rgbaTexture.name = request.SpriteName;
+                            rgbaTexture.filterMode = downloadedTexture.filterMode;
+                            rgbaTexture.wrapMode = downloadedTexture.wrapMode;
+                            rgbaTexture.SetPixels32(pixels);
+                            rgbaTexture.Apply(false, false);
+
+                            // Destroy old texture and use converted one
                             UnityEngine.Object.Destroy(downloadedTexture);
-                            return;
+                            downloadedTexture = rgbaTexture;
+
+                            Debug.Log($"[AtlasWebLoader] iOS: Conversion complete. New format: {downloadedTexture.format}");
                         }
+#endif
 
                         // Add to atlas
                         var (result, entry) = _atlas.Add(request.SpriteName, downloadedTexture);
@@ -488,11 +492,6 @@ namespace RuntimeAtlasPacker
                         request.SetFailed(webRequest.error);
                         OnDownloadFailed?.Invoke(request.Url, webRequest.error);
                     }
-                }
-                finally
-                {
-                    // Dispose UnityWebRequest and its handlers
-                    webRequest?.Dispose();
                 }
             }
             catch (Exception ex)
