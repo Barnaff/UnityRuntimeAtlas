@@ -162,10 +162,6 @@ namespace RuntimeAtlasPacker
             
             // Create first page
             CreateNewPage();
-            
-#if UNITY_EDITOR
-            Debug.Log($"[RuntimeAtlas] Created new atlas '{_debugName}' with ID {_registryId}");
-#endif
         }
 
         /// <summary>
@@ -212,19 +208,11 @@ namespace RuntimeAtlasPacker
             {
                 CreateNewPage();
             }
-            
-#if UNITY_EDITOR
-            Debug.Log($"[RuntimeAtlas] Created new atlas '{_debugName}' with ID {_registryId} (skipInitialPage: {skipInitialPage})");
-#endif
         }
 
         private void CreateNewPage()
         {
             var pageIndex = _textures.Count;
-            
-#if UNITY_EDITOR
-            Debug.Log($"[RuntimeAtlas.CreateNewPage] Creating page {pageIndex}. Size: {_settings.InitialSize}x{_settings.InitialSize}, Format: {_settings.Format}, Readable: {_settings.Readable}. Memory before: {System.GC.GetTotalMemory(false) / 1024 / 1024} MB");
-#endif
             
             // Create packer for this page
             IPackingAlgorithm packer = _settings.Algorithm switch
@@ -249,10 +237,6 @@ namespace RuntimeAtlasPacker
             packer.Initialize(_settings.InitialSize, _settings.InitialSize);
             _packers.Add(packer);
             
-#if UNITY_EDITOR
-            Debug.Log($"[RuntimeAtlas.CreateNewPage] Creating Texture2D object...");
-#endif
-            
             // Create texture
             var texture = new Texture2D(_settings.InitialSize, _settings.InitialSize, _settings.Format, _settings.GenerateMipMaps);
             texture.filterMode = _settings.FilterMode;
@@ -262,9 +246,6 @@ namespace RuntimeAtlasPacker
             // Clear texture based on UseRenderTextures setting
             if (_settings.UseRenderTextures)
             {
-#if UNITY_EDITOR
-                Debug.Log($"[RuntimeAtlas.CreateNewPage] Clearing texture with RenderTexture (GPU-accelerated)...");
-#endif
                 // ✅ MEMORY OPTIMIZATION: Use RenderTexture to clear instead of allocating large Color32 array
                 // This avoids a large CPU memory allocation (e.g., 4096x4096x4 = 64MB)
                 if (_settings.InitialSize > 0) // Ensure valid size
@@ -280,9 +261,6 @@ namespace RuntimeAtlasPacker
                         
                         if (texture.isReadable)
                         {
-#if UNITY_EDITOR
-                            Debug.Log($"[RuntimeAtlas.CreateNewPage] Using ReadPixels for readable texture...");
-#endif
                             // For readable textures, use ReadPixels
                             RenderTexture.active = rt;
                             texture.ReadPixels(new Rect(0, 0, _settings.InitialSize, _settings.InitialSize), 0, 0, false);
@@ -291,18 +269,13 @@ namespace RuntimeAtlasPacker
                         }
                         else
                         {
-#if UNITY_EDITOR
-                            Debug.Log($"[RuntimeAtlas.CreateNewPage] Using Graphics.CopyTexture for non-readable texture...");
-#endif
                             // For non-readable textures, use Graphics.CopyTexture
                             Graphics.CopyTexture(rt, texture);
                         }
                     }
                     catch (Exception ex)
                     {
-#if UNITY_EDITOR
-                        Debug.LogError($"[RuntimeAtlas.CreateNewPage] ✗ CRASH during RenderTexture clearing: {ex.Message}\nStack: {ex.StackTrace}");
-#endif
+                        Debug.LogError($"[RuntimeAtlas.CreateNewPage] RenderTexture clearing failed: {ex.Message}");
                         throw;
                     }
                     finally
@@ -316,9 +289,6 @@ namespace RuntimeAtlasPacker
             }
             else
             {
-#if UNITY_EDITOR
-                Debug.Log($"[RuntimeAtlas.CreateNewPage] Clearing texture with direct pixel operations (CPU)...");
-#endif
                 // Direct CPU pixel operations - only works with readable textures
                 if (!texture.isReadable)
                 {
@@ -334,10 +304,6 @@ namespace RuntimeAtlasPacker
             
             _textures.Add(texture);
             _currentPageIndex = pageIndex;
-            
-#if UNITY_EDITOR
-            Debug.Log($"[RuntimeAtlas.CreateNewPage] ✓ Page {pageIndex} created successfully. Total pages: {_textures.Count}, Memory after: {System.GC.GetTotalMemory(false) / 1024 / 1024} MB");
-#endif
         }
 
         /// <summary>
