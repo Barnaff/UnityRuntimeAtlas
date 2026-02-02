@@ -152,13 +152,16 @@ namespace RuntimeAtlasPacker.Samples
             UpdateStats();
         }
 
+#if UNITY_EDITOR
         /// <summary>
         /// Pre-analyze textures before packing.
+        /// Only available in Unity Editor.
         /// </summary>
         public PackingStats AnalyzeTextures(Texture2D[] textures)
         {
             return AtlasBatchProcessor.AnalyzeBatch(textures, settings.InitialSize, settings.Padding);
         }
+#endif
 
         private void OnAtlasResized(RuntimeAtlas atlas)
         {
