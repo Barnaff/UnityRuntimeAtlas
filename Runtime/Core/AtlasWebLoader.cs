@@ -262,7 +262,15 @@ namespace RuntimeAtlasPacker
                 }
 
                 Debug.Log($"[AtlasWebLoader.DownloadAndAddBatchAsync] Sprites created: {results.Count}. Now cleaning up downloaded textures...");
-                
+
+#if UNITY_IOS
+                // ✅ iOS CRITICAL: Flush GPU before destroying textures
+                // Apply() queues GPU uploads asynchronously - destroying textures before
+                // upload completes causes EXC_RESOURCE crash in UploadTextureData
+                Debug.Log($"[AtlasWebLoader.DownloadAndAddBatchAsync] iOS: Flushing GPU before texture cleanup...");
+                GL.Flush();
+#endif
+
                 // Cleanup downloaded textures
                 int cleanupCount = 0;
                 foreach (var kvp in textureBatch)
@@ -275,6 +283,15 @@ namespace RuntimeAtlasPacker
                     }
                 }
                 Debug.Log($"[AtlasWebLoader.DownloadAndAddBatchAsync] Cleanup complete: destroyed {cleanupCount} textures");
+
+#if UNITY_IOS
+                // ✅ iOS CRITICAL: Force memory cleanup to prevent memory pressure
+                // iOS has strict memory limits (~2GB) - force cleanup after batch operations
+                Debug.Log($"[AtlasWebLoader.DownloadAndAddBatchAsync] iOS: Forcing memory cleanup...");
+                System.GC.Collect();
+                Resources.UnloadUnusedAssets();
+#endif
+
                 Debug.Log($"[AtlasWebLoader.DownloadAndAddBatchAsync] Memory after cleanup: {System.GC.GetTotalMemory(false) / (1024 * 1024)}MB");
             }
 
@@ -468,6 +485,10 @@ namespace RuntimeAtlasPacker
                                 OnSpriteLoaded?.Invoke(request.Url, sprite);
 #if UNITY_EDITOR
                                 Debug.Log($"[AtlasWebLoader] ✓ Created sprite '{sprite.name}' - Texture: {sprite.texture.name}, Size: {sprite.rect.width}x{sprite.rect.height}");
+#endif
+#if UNITY_IOS
+                                // ✅ iOS CRITICAL: Flush GPU before destroying texture
+                                GL.Flush();
 #endif
                                 // ✅ MEMORY FIX: Destroy texture AFTER successful atlas add
                                 UnityEngine.Object.Destroy(downloadedTexture);
