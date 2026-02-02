@@ -18,6 +18,7 @@ namespace RuntimeAtlasPacker
         private readonly Dictionary<string, LoadRequest> _activeRequests;
         private readonly Queue<LoadRequest> _pendingQueue;
         private readonly int _maxConcurrentDownloads;
+        private readonly object _atlasLock = new object(); // Lock for atlas modifications
         private int _activeDownloads;
         private bool _isDisposed;
 
@@ -219,11 +220,16 @@ namespace RuntimeAtlasPacker
             if (textureBatch.Count > 0)
             {
                 // Add all to atlas in one batch (more efficient)
+                // ✅ THREAD SAFETY: Lock atlas modifications to prevent concurrent writes
                 Debug.Log($"[AtlasWebLoader.DownloadAndAddBatchAsync] Calling atlas.AddBatch with {textureBatch.Count} textures...");
                 Debug.Log($"[AtlasWebLoader.DownloadAndAddBatchAsync] Memory before AddBatch: {System.GC.GetTotalMemory(false) / (1024 * 1024)}MB");
-                
-                var entries = versions != null ? _atlas.AddBatch(textureBatch, versions) : _atlas.AddBatch(textureBatch);
-                
+
+                Dictionary<string, AtlasEntry> entries;
+                lock (_atlasLock)
+                {
+                    entries = versions != null ? _atlas.AddBatch(textureBatch, versions) : _atlas.AddBatch(textureBatch);
+                }
+
                 Debug.Log($"[AtlasWebLoader.DownloadAndAddBatchAsync] AddBatch completed, returned {entries.Count} entries");
                 Debug.Log($"[AtlasWebLoader.DownloadAndAddBatchAsync] Memory after AddBatch: {System.GC.GetTotalMemory(false) / (1024 * 1024)}MB");
 
@@ -383,7 +389,31 @@ namespace RuntimeAtlasPacker
                         
                         downloadedTexture.name = name;
                         Debug.Log($"[AtlasWebLoader.DownloadTextureAsync] Downloaded texture '{name}' - Size: {downloadedTexture.width}x{downloadedTexture.height}, Format: {downloadedTexture.format}, Memory: {(downloadedTexture.width * downloadedTexture.height * 4) / 1024}KB");
-                        
+
+#if UNITY_IOS
+                        // ✅ iOS CRITICAL FIX: Convert ARGB32 to RGBA32 to avoid Metal SIMD crash
+                        // DownloadHandlerTexture may return ARGB32 textures for PNG images
+                        // Metal's RemapSIMDWithPermute crashes when converting ARGB->RGBA during Apply()
+                        if (downloadedTexture.format == TextureFormat.ARGB32)
+                        {
+                            Debug.Log($"[AtlasWebLoader.DownloadTextureAsync] iOS: ARGB32 detected for '{name}', converting to RGBA32...");
+
+                            var pixels = downloadedTexture.GetPixels32();
+                            var rgbaTexture = new Texture2D(downloadedTexture.width, downloadedTexture.height, TextureFormat.RGBA32, false);
+                            rgbaTexture.name = name;
+                            rgbaTexture.filterMode = downloadedTexture.filterMode;
+                            rgbaTexture.wrapMode = downloadedTexture.wrapMode;
+                            rgbaTexture.SetPixels32(pixels);
+                            rgbaTexture.Apply(false, false);
+
+                            // Destroy old texture and use converted one
+                            UnityEngine.Object.Destroy(downloadedTexture);
+                            downloadedTexture = rgbaTexture;
+
+                            Debug.Log($"[AtlasWebLoader.DownloadTextureAsync] iOS: Conversion complete. New format: {downloadedTexture.format}");
+                        }
+#endif
+
                         // Return texture - caller is responsible for cleanup
                         Debug.Log($"[AtlasWebLoader.DownloadTextureAsync] Transferring texture ownership for '{name}' to caller");
                         var result = (name, downloadedTexture);
@@ -467,7 +497,13 @@ namespace RuntimeAtlasPacker
 #endif
 
                         // Add to atlas
-                        var (result, entry) = _atlas.Add(request.SpriteName, downloadedTexture);
+                        // ✅ THREAD SAFETY: Lock atlas modifications to prevent concurrent writes
+                        AddResult result;
+                        AtlasEntry entry;
+                        lock (_atlasLock)
+                        {
+                            (result, entry) = _atlas.Add(request.SpriteName, downloadedTexture);
+                        }
 
                         if (result == AddResult.Success && entry != null && entry.IsValid)
                         {
