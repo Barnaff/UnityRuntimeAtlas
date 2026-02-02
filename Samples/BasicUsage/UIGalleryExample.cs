@@ -39,7 +39,7 @@ namespace RuntimeAtlasPacker.Samples
                 InitialSize = 512,
                 MaxSize = 2048,
                 Padding = 2,
-                Format = TextureFormat.RGBA32,
+                Format = TextureFormat.ARGB32,
                 Algorithm = PackingAlgorithm.MaxRects
             });
 

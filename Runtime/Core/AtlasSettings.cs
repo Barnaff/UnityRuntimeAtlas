@@ -62,7 +62,7 @@ namespace RuntimeAtlasPacker
             InitialSize = 1024,
             MaxSize = 4096,
             Padding = 2,
-            Format = TextureFormat.RGBA32,
+            Format = TextureFormat.ARGB32,
             FilterMode = FilterMode.Bilinear,
             GenerateMipMaps = false,
             Readable = true,  // ✅ Safe default - set to false for mobile to save memory
@@ -79,7 +79,7 @@ namespace RuntimeAtlasPacker
             InitialSize = 512,
             MaxSize = 2048,
             Padding = 1,
-            Format = TextureFormat.RGBA32,
+            Format = TextureFormat.ARGB32,
             FilterMode = FilterMode.Bilinear,
             GenerateMipMaps = false,
             Readable = false,  // ✅ Memory optimized - saves 50% memory on mobile

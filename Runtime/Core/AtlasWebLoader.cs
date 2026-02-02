@@ -397,7 +397,7 @@ namespace RuntimeAtlasPacker
                             Debug.Log($"[AtlasWebLoader.DownloadTextureAsync] iOS: Got {pixels.Length} pixels for '{name}'");
                             
                             Debug.Log($"[AtlasWebLoader.DownloadTextureAsync] iOS: Creating RGBA32 texture for '{name}'...");
-                            var rgbaTexture = new Texture2D(downloadedTexture.width, downloadedTexture.height, TextureFormat.RGBA32, false);
+                            var rgbaTexture = new Texture2D(downloadedTexture.width, downloadedTexture.height, TextureFormat.ARGB32, false);
                             rgbaTexture.name = name;
                             rgbaTexture.filterMode = downloadedTexture.filterMode;
                             rgbaTexture.wrapMode = downloadedTexture.wrapMode;

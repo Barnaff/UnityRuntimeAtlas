@@ -888,7 +888,7 @@ namespace RuntimeAtlasPacker
                     // ✅ PLATFORM FIX: Always use RGBA32 when loading from PNG to avoid SIMD conversion issues
                     // PNG files are naturally RGBA format, using RGBA32 prevents format conversion issues
                     // This prevents crashes in RemapSIMDWithPermute on mobile platforms (iOS/Android)
-                    var texture = new Texture2D(2, 2, TextureFormat.RGBA32, settings.GenerateMipMaps);
+                    var texture = new Texture2D(2, 2, TextureFormat.ARGB32, settings.GenerateMipMaps);
                     texture.filterMode = settings.FilterMode;
                     texture.wrapMode = TextureWrapMode.Clamp;
                     texture.name = $"RuntimeAtlas_Page{i}_Loaded";
@@ -916,7 +916,7 @@ namespace RuntimeAtlasPacker
                         var pixels = texture.GetPixels32();
 
                         // Create new RGBA32 texture
-                        var rgbaTexture = new Texture2D(texture.width, texture.height, TextureFormat.RGBA32, settings.GenerateMipMaps);
+                        var rgbaTexture = new Texture2D(texture.width, texture.height, TextureFormat.ARGB32, settings.GenerateMipMaps);
                         rgbaTexture.filterMode = settings.FilterMode;
                         rgbaTexture.wrapMode = TextureWrapMode.Clamp;
                         rgbaTexture.name = texture.name;
@@ -1109,7 +1109,7 @@ namespace RuntimeAtlasPacker
                     // ✅ PLATFORM FIX: Always use RGBA32 when loading from PNG to avoid SIMD conversion issues
                     // PNG files are naturally RGBA format, using RGBA32 prevents format conversion issues
                     // This prevents crashes in RemapSIMDWithPermute on mobile platforms (iOS/Android)
-                    var texture = new Texture2D(2, 2, TextureFormat.RGBA32, settings.GenerateMipMaps);
+                    var texture = new Texture2D(2, 2, TextureFormat.ARGB32, settings.GenerateMipMaps);
                     texture.filterMode = settings.FilterMode;
                     texture.wrapMode = TextureWrapMode.Clamp;
                     texture.name = $"RuntimeAtlas_Page{i}_Loaded";
