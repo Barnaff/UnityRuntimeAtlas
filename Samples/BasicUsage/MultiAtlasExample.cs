@@ -46,7 +46,7 @@ namespace RuntimeAtlasPacker.Samples
                 InitialSize = 512,
                 MaxSize = 2048,
                 Padding = 2,
-                Format = TextureFormat.RGBA32,
+                Format = AtlasSettings.DefaultFormat,
                 FilterMode = FilterMode.Bilinear,
                 Algorithm = PackingAlgorithm.MaxRects,
                 GenerateMipMaps = false
@@ -58,7 +58,7 @@ namespace RuntimeAtlasPacker.Samples
                 InitialSize = 1024,
                 MaxSize = 4096,
                 Padding = 2,
-                Format = TextureFormat.RGBA32,
+                Format = AtlasSettings.DefaultFormat,
                 FilterMode = FilterMode.Bilinear,
                 Algorithm = PackingAlgorithm.MaxRects,
                 GenerateMipMaps = true
@@ -70,7 +70,7 @@ namespace RuntimeAtlasPacker.Samples
                 InitialSize = 256,
                 MaxSize = 1024,
                 Padding = 1,
-                Format = TextureFormat.RGBA32,
+                Format = AtlasSettings.DefaultFormat,
                 FilterMode = FilterMode.Point,
                 Algorithm = PackingAlgorithm.Skyline, // Faster for many small textures
                 GenerateMipMaps = false
@@ -82,7 +82,7 @@ namespace RuntimeAtlasPacker.Samples
                 InitialSize = 2048,
                 MaxSize = 4096,
                 Padding = 4,
-                Format = TextureFormat.RGBA32,
+                Format = AtlasSettings.DefaultFormat,
                 FilterMode = FilterMode.Trilinear,
                 Algorithm = PackingAlgorithm.MaxRects,
                 GenerateMipMaps = true

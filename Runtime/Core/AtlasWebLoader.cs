@@ -383,41 +383,7 @@ namespace RuntimeAtlasPacker
                         
                         downloadedTexture.name = name;
                         Debug.Log($"[AtlasWebLoader.DownloadTextureAsync] Downloaded texture '{name}' - Size: {downloadedTexture.width}x{downloadedTexture.height}, Format: {downloadedTexture.format}, Memory: {(downloadedTexture.width * downloadedTexture.height * 4) / 1024}KB");
-
-#if UNITY_IOS
-                        // ✅ iOS CRITICAL FIX: Convert ARGB32 to RGBA32 to avoid Metal SIMD crash
-                        // DownloadHandlerTexture may return ARGB32 textures for PNG images
-                        // Metal's RemapSIMDWithPermute crashes when converting ARGB->RGBA during Apply()
-                        if (downloadedTexture.format == TextureFormat.ARGB32)
-                        {
-                            Debug.Log($"[AtlasWebLoader.DownloadTextureAsync] iOS: ARGB32 detected for '{name}', converting to RGBA32...");
-
-                            Debug.Log($"[AtlasWebLoader.DownloadTextureAsync] iOS: Getting pixels for '{name}'...");
-                            var pixels = downloadedTexture.GetPixels32();
-                            Debug.Log($"[AtlasWebLoader.DownloadTextureAsync] iOS: Got {pixels.Length} pixels for '{name}'");
-                            
-                            Debug.Log($"[AtlasWebLoader.DownloadTextureAsync] iOS: Creating RGBA32 texture for '{name}'...");
-                            var rgbaTexture = new Texture2D(downloadedTexture.width, downloadedTexture.height, TextureFormat.ARGB32, false);
-                            rgbaTexture.name = name;
-                            rgbaTexture.filterMode = downloadedTexture.filterMode;
-                            rgbaTexture.wrapMode = downloadedTexture.wrapMode;
-                            
-                            Debug.Log($"[AtlasWebLoader.DownloadTextureAsync] iOS: Setting pixels for '{name}'...");
-                            rgbaTexture.SetPixels32(pixels);
-                            
-                            Debug.Log($"[AtlasWebLoader.DownloadTextureAsync] iOS: Applying texture for '{name}'...");
-                            rgbaTexture.Apply(false, false);
-                            Debug.Log($"[AtlasWebLoader.DownloadTextureAsync] iOS: Apply complete for '{name}'");
-
-                            // Destroy old texture and use converted one
-                            Debug.Log($"[AtlasWebLoader.DownloadTextureAsync] iOS: Destroying old ARGB32 texture for '{name}'");
-                            UnityEngine.Object.Destroy(downloadedTexture);
-                            downloadedTexture = rgbaTexture;
-
-                            Debug.Log($"[AtlasWebLoader.DownloadTextureAsync] iOS: Conversion COMPLETE for '{name}', new format: {downloadedTexture.format}");
-                        }
-#endif
-
+                        
                         // Return texture - caller is responsible for cleanup
                         Debug.Log($"[AtlasWebLoader.DownloadTextureAsync] Transferring texture ownership for '{name}' to caller");
                         var result = (name, downloadedTexture);
@@ -434,16 +400,15 @@ namespace RuntimeAtlasPacker
             catch (Exception ex)
             {
                 Debug.LogError($"[AtlasWebLoader.DownloadTextureAsync] EXCEPTION for '{name}': {ex.GetType().Name} - {ex.Message}\nStackTrace: {ex.StackTrace}");
-                return (name, null);
-            }
-            finally
-            {
-                // MEMORY LEAK FIX: Clean up texture if we still own it (error path)
+                
+                // Clean up texture on exception since we won't return it to caller
                 if (downloadedTexture != null)
                 {
-                    Debug.LogWarning($"[AtlasWebLoader.DownloadTextureAsync] FINALLY block destroying leftover texture for '{name}' (error path)");
+                    Debug.LogWarning($"[AtlasWebLoader.DownloadTextureAsync] Destroying texture due to exception for '{name}'");
                     UnityEngine.Object.Destroy(downloadedTexture);
                 }
+                
+                return (name, null);
             }
         }
 
@@ -516,6 +481,9 @@ namespace RuntimeAtlasPacker
 #if UNITY_EDITOR
                                 Debug.Log($"[AtlasWebLoader] ✓ Created sprite '{sprite.name}' - Texture: {sprite.texture.name}, Size: {sprite.rect.width}x{sprite.rect.height}");
 #endif
+                                // ✅ MEMORY FIX: Destroy texture AFTER successful atlas add
+                                UnityEngine.Object.Destroy(downloadedTexture);
+                                downloadedTexture = null;
                             }
                             else
                             {
@@ -524,12 +492,24 @@ namespace RuntimeAtlasPacker
 #if UNITY_EDITOR
                                 Debug.LogWarning($"[AtlasWebLoader] Created sprite is invalid - sprite: {sprite != null}, texture: {sprite?.texture != null}");
 #endif
+                                // Clean up texture on failure
+                                if (downloadedTexture != null)
+                                {
+                                    UnityEngine.Object.Destroy(downloadedTexture);
+                                    downloadedTexture = null;
+                                }
                             }
                         }
                         else
                         {
                             request.SetFailed($"Failed to add to atlas: {result}");
                             OnDownloadFailed?.Invoke(request.Url, result.ToString());
+                            // Clean up texture on failure
+                            if (downloadedTexture != null)
+                            {
+                                UnityEngine.Object.Destroy(downloadedTexture);
+                                downloadedTexture = null;
+                            }
                         }
                     }
                     else
@@ -543,12 +523,19 @@ namespace RuntimeAtlasPacker
             {
                 request.SetFailed(ex.Message);
                 OnDownloadFailed?.Invoke(request.Url, ex.Message);
+                // Clean up texture on exception
+                if (downloadedTexture != null)
+                {
+                    UnityEngine.Object.Destroy(downloadedTexture);
+                    downloadedTexture = null;
+                }
             }
             finally
             {
-                // MEMORY LEAK FIX: Always cleanup downloaded texture, even on exception
+                // Clean up any remaining texture (safety net)
                 if (downloadedTexture != null)
                 {
+                    Debug.LogWarning($"[AtlasWebLoader] Finally block cleanup for '{request.SpriteName}' - texture should have been cleaned up earlier");
                     UnityEngine.Object.Destroy(downloadedTexture);
                 }
                 

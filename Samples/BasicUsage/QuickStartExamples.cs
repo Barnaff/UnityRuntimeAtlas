@@ -112,7 +112,7 @@ namespace RuntimeAtlasPacker.Samples
                 InitialSize = 512,      // Starting size
                 MaxSize = 2048,         // Maximum size
                 Padding = 2,            // Pixels between sprites
-                Format = TextureFormat.RGBA32,  // Texture format
+                Format = AtlasSettings.DefaultFormat,  // Texture format
                 FilterMode = FilterMode.Bilinear,
                 GenerateMipMaps = false,
                 Readable = false,

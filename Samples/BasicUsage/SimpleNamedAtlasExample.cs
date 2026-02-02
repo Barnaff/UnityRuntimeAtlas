@@ -136,7 +136,7 @@ public class SimpleNamedAtlasExample : MonoBehaviour
             InitialSize = 1024,
             MaxSize = 2048,
             Padding = 2,
-            Format = TextureFormat.RGBA32,
+            Format = AtlasSettings.DefaultFormat,
             FilterMode = FilterMode.Bilinear,
             Algorithm = PackingAlgorithm.MaxRects
         };

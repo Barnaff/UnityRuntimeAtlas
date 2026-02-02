@@ -8,6 +8,14 @@ namespace RuntimeAtlasPacker
     [System.Serializable]
     public struct AtlasSettings
     {
+        /// <summary>
+        /// Default texture format for all atlases.
+        /// ARGB32 provides best quality with full alpha support and is compatible with all platforms.
+        /// 4 bytes per pixel (32-bit ARGB).
+        /// Change this constant to modify the default format across the entire package.
+        /// </summary>
+        public const TextureFormat DefaultFormat = TextureFormat.ARGB32;
+        
         /// <summary>Initial atlas size. Will grow if needed.</summary>
         public int InitialSize;
         
@@ -62,7 +70,7 @@ namespace RuntimeAtlasPacker
             InitialSize = 1024,
             MaxSize = 4096,
             Padding = 2,
-            Format = TextureFormat.ARGB32,
+            Format = DefaultFormat,
             FilterMode = FilterMode.Bilinear,
             GenerateMipMaps = false,
             Readable = true,  // ✅ Safe default - set to false for mobile to save memory
@@ -79,7 +87,7 @@ namespace RuntimeAtlasPacker
             InitialSize = 512,
             MaxSize = 2048,
             Padding = 1,
-            Format = TextureFormat.ARGB32,
+            Format = DefaultFormat,
             FilterMode = FilterMode.Bilinear,
             GenerateMipMaps = false,
             Readable = false,  // ✅ Memory optimized - saves 50% memory on mobile
@@ -94,7 +102,7 @@ namespace RuntimeAtlasPacker
             InitialSize = 2048,
             MaxSize = 8192,
             Padding = 4,
-            Format = TextureFormat.RGBA32,
+            Format = DefaultFormat,
             FilterMode = FilterMode.Trilinear,
             GenerateMipMaps = true,
             Readable = true,  // ✅ High quality preset - readable for flexibility

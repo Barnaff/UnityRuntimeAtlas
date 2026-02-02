@@ -34,7 +34,7 @@ namespace RuntimeAtlasPacker.Samples
                 InitialSize = atlasSize,
                 MaxSize = maxAtlasSize,
                 Padding = 2,
-                Format = TextureFormat.RGBA32,
+                Format = AtlasSettings.DefaultFormat,
                 Algorithm = PackingAlgorithm.MaxRects,
                 GrowthStrategy = GrowthStrategy.Double
             });

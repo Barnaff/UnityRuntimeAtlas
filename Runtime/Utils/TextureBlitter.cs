@@ -896,7 +896,7 @@ namespace RuntimeAtlasPacker
                 var prev = RenderTexture.active;
                 RenderTexture.active = rt;
                 
-                var result = new Texture2D(region.width, region.height, TextureFormat.ARGB32, false);
+                var result = new Texture2D(region.width, region.height, AtlasSettings.DefaultFormat, false);
                 result.ReadPixels(new Rect(region.x, region.y, region.width, region.height), 0, 0);
                 result.Apply();
                 
@@ -906,7 +906,7 @@ namespace RuntimeAtlasPacker
                 return result;
             }
 
-            var copy = new Texture2D(region.width, region.height, TextureFormat.ARGB32, false);
+            var copy = new Texture2D(region.width, region.height, AtlasSettings.DefaultFormat, false);
             var sourcePixels = source.GetPixels(region.x, region.y, region.width, region.height);
             copy.SetPixels(sourcePixels);
             copy.Apply();

@@ -421,7 +421,7 @@ namespace RuntimeAtlasPacker.Samples
                 MaxSize = _atlasSize,
                 MaxPageCount = _maxPages,
                 Padding = _padding,
-                Format = TextureFormat.RGBA32,
+                 Format = AtlasSettings.DefaultFormat,
                 FilterMode = FilterMode.Bilinear,
                 GenerateMipMaps = false,
                 Readable = true,

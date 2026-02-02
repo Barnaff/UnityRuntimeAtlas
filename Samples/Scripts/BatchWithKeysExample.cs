@@ -38,7 +38,7 @@ namespace RuntimeAtlasPacker.Samples
                     MaxSize = 2048,
                     MaxPageCount = 5,
                     Padding = 2,
-                    Format = TextureFormat.RGBA32
+                    Format = AtlasSettings.DefaultFormat
                 };
                 runtimeAtlas = new RuntimeAtlas(settings);
             }

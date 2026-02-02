@@ -45,7 +45,7 @@ namespace RuntimeAtlasPacker.Samples
                 InitialSize = 256,
                 MaxSize = 1024,
                 Padding = 1,
-                Format = TextureFormat.ARGB32,
+                Format = AtlasSettings.DefaultFormat,
                 FilterMode = FilterMode.Point
             });
 

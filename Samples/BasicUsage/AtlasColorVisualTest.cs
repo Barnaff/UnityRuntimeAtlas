@@ -49,7 +49,7 @@ namespace RuntimeAtlasPacker.Samples
             {
                 InitialSize = 256,
                 MaxSize = 256,
-                Format = TextureFormat.RGBA32,
+                Format = AtlasSettings.DefaultFormat,
                 FilterMode = FilterMode.Point,
                 Readable = true,
                 GenerateMipMaps = false,

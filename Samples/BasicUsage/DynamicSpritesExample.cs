@@ -41,7 +41,7 @@ namespace RuntimeAtlasPacker.Samples
                 InitialSize = 512,
                 MaxSize = 2048,
                 Padding = 1,
-                Format = TextureFormat.RGBA32,
+                Format = AtlasSettings.DefaultFormat,
                 Algorithm = PackingAlgorithm.MaxRects,
                 FilterMode = FilterMode.Point, // Pixel art friendly
                 GenerateMipMaps = false

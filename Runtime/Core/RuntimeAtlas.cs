@@ -119,8 +119,8 @@ namespace RuntimeAtlasPacker
             // Validate and fix settings if needed
             if (settings.Format == 0 || !SystemInfo.SupportsTextureFormat(settings.Format))
             {
-                Debug.LogWarning($"[RuntimeAtlas] Invalid or unsupported texture format {settings.Format}. Using RGBA32 instead.");
-                settings.Format = TextureFormat.ARGB32;
+                Debug.LogWarning($"[RuntimeAtlas] Invalid or unsupported texture format {settings.Format}. Using {AtlasSettings.DefaultFormat} instead.");
+                settings.Format = AtlasSettings.DefaultFormat;
             }
 
             // Ensure valid dimensions
@@ -179,9 +179,9 @@ namespace RuntimeAtlasPacker
             // Format validation
             if (settings.Format == 0 || !SystemInfo.SupportsTextureFormat(settings.Format))
             {
-                settings.Format = TextureFormat.ARGB32;
+                settings.Format = AtlasSettings.DefaultFormat;
 #if UNITY_EDITOR
-                Debug.LogWarning("[RuntimeAtlas] TextureFormat not supported, using RGBA32");
+                Debug.LogWarning($"[RuntimeAtlas] TextureFormat not supported, using {AtlasSettings.DefaultFormat}");
 #endif
             }
 
