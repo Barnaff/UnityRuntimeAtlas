@@ -423,10 +423,32 @@ namespace RuntimeAtlasPacker
             Debug.Log($"[TextureBlitter.BlitWithMaterial] Target: {target.name}, Size: {target.width}x{target.height}, Format: {target.format}, Readable: {target.isReadable}");
             Debug.Log($"[TextureBlitter.BlitWithMaterial] Position: ({x}, {y})");
 
-            // ✅ iOS FIX: Always use GPU-based blit method
-            // CPU method causes crashes on large textures (4096x4096) due to massive array allocation (64MB)
-            // iOS IL2CPP has strict limits on array allocation size (~16-32MB)
-            // GPU method uses RenderTexture which doesn't have this limitation
+#if UNITY_IOS
+            // ✅ iOS CRITICAL FIX: Use direct Texture2D.SetPixels() to avoid RenderTexture format issues
+            // RenderTexture uses ARGB32 but atlas uses RGBA32 - format mismatch causes crashes
+            // Direct pixel copy with GetPixels/SetPixels handles format conversion safely
+            
+            if (source.isReadable && target.isReadable)
+            {
+                Debug.Log($"[TextureBlitter.BlitWithMaterial] iOS: Using direct Texture2D pixel copy (no RenderTexture)...");
+                try
+                {
+                    BlitDirectPixelCopy(source, target, x, y);
+                    Debug.Log($"[TextureBlitter.BlitWithMaterial] iOS: Direct pixel copy completed successfully");
+                    Debug.Log($"[TextureBlitter.BlitWithMaterial] ========== SINGLE BLIT END ==========");
+                    return;
+                }
+                catch (System.Exception ex)
+                {
+                    Debug.LogError($"[TextureBlitter.BlitWithMaterial] iOS: Direct pixel copy failed: {ex.Message}");
+                    // Fall through to GPU method
+                }
+            }
+            else
+            {
+                Debug.Log($"[TextureBlitter.BlitWithMaterial] iOS: Textures not readable (source:{source.isReadable}, target:{target.isReadable}), using GPU method...");
+            }
+#endif
 
             EnsureMaterial();
 
@@ -716,6 +738,33 @@ namespace RuntimeAtlasPacker
 
             GL.PopMatrix();
             RenderTexture.active = prev;
+        }
+
+        /// <summary>
+        /// Direct CPU-based pixel copy using GetPixels/SetPixels with region.
+        /// More efficient than BlitCPUDirect as it only reads/writes affected regions.
+        /// Handles format conversion automatically.
+        /// </summary>
+        private static void BlitDirectPixelCopy(Texture2D source, Texture2D target, int x, int y)
+        {
+            Debug.Log($"[TextureBlitter.BlitDirectPixelCopy] START: {source.width}x{source.height} -> target at ({x},{y})");
+            Debug.Log($"[TextureBlitter.BlitDirectPixelCopy] Source format: {source.format}, Target format: {target.format}");
+            Debug.Log($"[TextureBlitter.BlitDirectPixelCopy] Memory before: {System.GC.GetTotalMemory(false) / (1024 * 1024)}MB");
+
+            // Get source pixels - Unity handles format conversion automatically
+            var sourcePixels = source.GetPixels();
+            Debug.Log($"[TextureBlitter.BlitDirectPixelCopy] Got {sourcePixels.Length} source pixels");
+
+            // SetPixels with region - only modifies the target region, very efficient
+            target.SetPixels(x, y, source.width, source.height, sourcePixels);
+            Debug.Log($"[TextureBlitter.BlitDirectPixelCopy] SetPixels complete (region: {x},{y} size:{source.width}x{source.height})");
+
+            Debug.Log($"[TextureBlitter.BlitDirectPixelCopy] Calling Apply...");
+            target.Apply(false, false);
+            Debug.Log($"[TextureBlitter.BlitDirectPixelCopy] Apply complete");
+
+            Debug.Log($"[TextureBlitter.BlitDirectPixelCopy] Memory after: {System.GC.GetTotalMemory(false) / (1024 * 1024)}MB");
+            Debug.Log($"[TextureBlitter.BlitDirectPixelCopy] COMPLETE");
         }
 
         /// <summary>
