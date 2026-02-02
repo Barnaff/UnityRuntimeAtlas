@@ -916,7 +916,8 @@ namespace RuntimeAtlasPacker
                         var pixels = texture.GetPixels32();
 
                         // Create new RGBA32 texture
-                        var rgbaTexture = new Texture2D(texture.width, texture.height, TextureFormat.ARGB32, settings.GenerateMipMaps);
+                        // ✅ BUG FIX: Was incorrectly using ARGB32 instead of RGBA32!
+                        var rgbaTexture = new Texture2D(texture.width, texture.height, TextureFormat.RGBA32, settings.GenerateMipMaps);
                         rgbaTexture.filterMode = settings.FilterMode;
                         rgbaTexture.wrapMode = TextureWrapMode.Clamp;
                         rgbaTexture.name = texture.name;
