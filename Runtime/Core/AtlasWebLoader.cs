@@ -467,14 +467,14 @@ namespace RuntimeAtlasPacker
 
                         // Add to atlas
                         // ✅ THREAD SAFETY: Lock atlas modifications to prevent concurrent writes
-                        AddResult result;
+                        AddResultType result;
                         AtlasEntry entry;
                         lock (_atlasLock)
                         {
                             (result, entry) = _atlas.Add(request.SpriteName, downloadedTexture);
                         }
 
-                        if (result == AddResult.Success && entry != null && entry.IsValid)
+                        if (result == AddResultType.Success && entry != null && entry.IsValid)
                         {
                             var sprite = entry.CreateSprite();
                             

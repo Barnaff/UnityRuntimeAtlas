@@ -238,7 +238,7 @@ namespace RuntimeAtlasPacker
         {
             var targetAtlas = atlas ?? AtlasPacker.Default;
             var (result, entry) = targetAtlas.Add(texture);
-            if (result == AddResult.Success && entry != null)
+            if (result == AddResultType.Success && entry != null)
             {
                 entry.ApplyTo(renderer, pixelsPerUnit);
             }
@@ -253,7 +253,7 @@ namespace RuntimeAtlasPacker
         {
             var targetAtlas = atlas ?? AtlasPacker.Default;
             var (result, entry) = targetAtlas.Add(texture);
-            if (result == AddResult.Success && entry != null)
+            if (result == AddResultType.Success && entry != null)
             {
                 entry.ApplyTo(image, pixelsPerUnit);
             }
@@ -268,7 +268,7 @@ namespace RuntimeAtlasPacker
         {
             var targetAtlas = atlas ?? AtlasPacker.Default;
             var (result, entry) = targetAtlas.Add(texture);
-            if (result == AddResult.Success && entry != null)
+            if (result == AddResultType.Success && entry != null)
             {
                 renderer.SetEntry(entry);
             }
@@ -283,7 +283,7 @@ namespace RuntimeAtlasPacker
         {
             var targetAtlas = atlas ?? AtlasPacker.Default;
             var (result, entry) = targetAtlas.Add(texture);
-            if (result == AddResult.Success && entry != null)
+            if (result == AddResultType.Success && entry != null)
             {
                 image.SetEntry(entry);
             }
@@ -298,7 +298,7 @@ namespace RuntimeAtlasPacker
         {
             var targetAtlas = atlas ?? AtlasPacker.Default;
             var (result, entry) = targetAtlas.Add(texture);
-            if (result == AddResult.Success && entry != null)
+            if (result == AddResultType.Success && entry != null)
             {
                 rawImage.SetEntry(entry);
             }

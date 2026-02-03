@@ -166,7 +166,7 @@ namespace RuntimeAtlasPacker.Samples
             }
 
             var (result, entry) = atlas.Add(texture);
-            if (result == AddResult.Success && entry != null)
+            if (result == AddResultType.Success && entry != null)
             {
                 _entries[category].Add(entry);
                 return entry;

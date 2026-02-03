@@ -145,7 +145,7 @@ namespace RuntimeAtlasPacker
                     : AtlasPacker.GetOrCreate(_targetAtlasName);
 
                 var (result, entry) = atlas.Add(texture);
-                if (result == AddResult.Success && entry != null)
+                if (result == AddResultType.Success && entry != null)
                 {
                     SetEntry(entry);
                 }

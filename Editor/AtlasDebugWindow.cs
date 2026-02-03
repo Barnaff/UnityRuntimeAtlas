@@ -996,7 +996,7 @@ namespace RuntimeAtlasPacker.Editor
                                     }
                                     
                                     var (result, entry) = _selectedAtlas.Add(texture);
-                                    if (result == AddResult.Success && entry != null)
+                                    if (result == AddResultType.Success && entry != null)
                                     {
                                         Debug.Log($"Added texture to atlas: {texture.name} (Entry ID: {entry.Id})");
                                     }

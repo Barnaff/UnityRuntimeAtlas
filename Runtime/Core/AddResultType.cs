@@ -3,7 +3,7 @@ namespace RuntimeAtlasPacker
     /// <summary>
     /// Result of adding a texture to an atlas.
     /// </summary>
-    public enum AddResult
+    public enum AddResultType
     {
         /// <summary>Texture was successfully added to the atlas.</summary>
         Success,

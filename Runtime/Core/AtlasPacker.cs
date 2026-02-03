@@ -62,13 +62,13 @@ namespace RuntimeAtlasPacker
             {
                 // Try default atlas first
                 var (result, entry) = Default.Add(texture);
-                if (result == AddResult.Success)
+                if (result == AddResultType.Success)
                 {
                     return entry;
                 }
 
                 // Check if texture is too large or invalid
-                if (result == AddResult.TooLarge)
+                if (result == AddResultType.TooLarge)
                 {
 #if UNITY_EDITOR
                     Debug.LogError($"[AtlasPacker] Texture is too large to fit in any atlas (MaxSize: {Default.Settings.MaxSize})");
@@ -76,7 +76,7 @@ namespace RuntimeAtlasPacker
                     return null;
                 }
                 
-                if (result == AddResult.InvalidTexture)
+                if (result == AddResultType.InvalidTexture)
                 {
 #if UNITY_EDITOR
                     Debug.LogError("[AtlasPacker] Invalid texture provided");
@@ -99,7 +99,7 @@ namespace RuntimeAtlasPacker
                     if (_namedAtlases.TryGetValue(overflowName, out var overflowAtlas))
                     {
                         (result, entry) = overflowAtlas.Add(texture);
-                        if (result == AddResult.Success)
+                        if (result == AddResultType.Success)
                         {
 #if UNITY_EDITOR
                             Debug.Log($"[AtlasPacker] Added to existing overflow atlas: {overflowName}");
@@ -119,7 +119,7 @@ namespace RuntimeAtlasPacker
                         _overflowCounters["[Default]"] = overflowIndex;
                         
                         (result, entry) = newAtlas.Add(texture);
-                        if (result == AddResult.Success)
+                        if (result == AddResultType.Success)
                         {
 #if UNITY_EDITOR
                             Debug.Log($"[AtlasPacker] Successfully added to new overflow atlas: {overflowName}");
@@ -252,7 +252,7 @@ namespace RuntimeAtlasPacker
         public static Sprite PackSprite(Sprite sprite, float? pixelsPerUnit = null)
         {
             var (result, entry) = Default.Add(sprite.texture);
-            if (result != AddResult.Success || entry == null)
+            if (result != AddResultType.Success || entry == null)
             {
 #if UNITY_EDITOR
                 Debug.LogWarning($"[AtlasPacker] Failed to pack sprite '{sprite.name}': {result}");
@@ -280,17 +280,17 @@ namespace RuntimeAtlasPacker
                 // Try main named atlas first
                 var atlas = GetOrCreate(atlasName);
                 var (result, entry) = atlas.Add(texture);
-                if (result == AddResult.Success)
+                if (result == AddResultType.Success)
                     return entry;
 
                 // Check if texture is too large or invalid
-                if (result == AddResult.TooLarge)
+                if (result == AddResultType.TooLarge)
                 {
                     Debug.LogError($"[AtlasPacker] Texture is too large to fit in atlas '{atlasName}' (MaxSize: {atlas.Settings.MaxSize})");
                     return null;
                 }
                 
-                if (result == AddResult.InvalidTexture)
+                if (result == AddResultType.InvalidTexture)
                 {
                     Debug.LogError($"[AtlasPacker] Invalid texture provided for atlas '{atlasName}'");
                     return null;
@@ -311,7 +311,7 @@ namespace RuntimeAtlasPacker
                     if (_namedAtlases.TryGetValue(overflowName, out var overflowAtlas))
                     {
                         (result, entry) = overflowAtlas.Add(texture);
-                        if (result == AddResult.Success)
+                        if (result == AddResultType.Success)
                         {
 #if UNITY_EDITOR
                             Debug.Log($"[AtlasPacker] Added to existing overflow atlas: {overflowName}");
@@ -331,7 +331,7 @@ namespace RuntimeAtlasPacker
                         _overflowCounters[atlasName] = overflowIndex;
                         
                         (result, entry) = newAtlas.Add(texture);
-                        if (result == AddResult.Success)
+                        if (result == AddResultType.Success)
                         {
 #if UNITY_EDITOR
                             Debug.Log($"[AtlasPacker] Successfully added to new overflow atlas: {overflowName}");

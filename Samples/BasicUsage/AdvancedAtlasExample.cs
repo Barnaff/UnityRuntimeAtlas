@@ -69,7 +69,7 @@ namespace RuntimeAtlasPacker.Samples
 
             // Pack and cache (using synchronous Add)
             var (result, entry) = _atlas.Add(texture);
-            if (result != AddResult.Success || entry == null)
+            if (result != AddResultType.Success || entry == null)
             {
                 Debug.LogWarning($"Failed to pack sprite '{spriteName}': {result}");
                 return null;

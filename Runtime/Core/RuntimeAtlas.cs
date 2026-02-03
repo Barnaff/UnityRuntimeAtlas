@@ -331,14 +331,14 @@ namespace RuntimeAtlasPacker
         /// var (result, entry) = atlas.Add(texture, spriteVersion: 2);
         /// </code>
         /// </example>
-        public (AddResult result, AtlasEntry entry) Add(Texture2D texture, int spriteVersion = 0)
+        public (AddResultType result, AtlasEntry entry) Add(Texture2D texture, int spriteVersion = 0)
         {
             if (_isDisposed)
             {
 #if UNITY_EDITOR
                 Debug.LogWarning("[RuntimeAtlas.Add] Atlas is disposed");
 #endif
-                return (AddResult.Failed, null);
+                return (AddResultType.Failed, null);
             }
             
             if (texture == null)
@@ -346,30 +346,25 @@ namespace RuntimeAtlasPacker
 #if UNITY_EDITOR
                 Debug.LogWarning("[RuntimeAtlas.Add] Null texture provided");
 #endif
-                return (AddResult.InvalidTexture, null);
+                return (AddResultType.InvalidTexture, null);
             }
 
             // ✅ FIX: Check if texture is readable before proceeding
             if (!EnsureTextureReadable(texture))
             {
-                return (AddResult.InvalidTexture, null);
+                return (AddResultType.InvalidTexture, null);
             }
 
 #if UNITY_EDITOR
             var profiler = RuntimeAtlasProfiler.Begin("Add", GetAtlasName(), $"{texture.name} ({texture.width}x{texture.height})");
 #endif
 
-#if UNITY_EDITOR
-            Debug.Log($"[RuntimeAtlas] Add: Packing '{texture.name}': {texture.width}x{texture.height}");
-#endif
-
             // Use internal method for packing
             var (result, entry) = AddInternal(texture, spriteVersion);
             
-            if (result != AddResult.Success)
+            if (result != AddResultType.Success)
             {
 #if UNITY_EDITOR
-                Debug.LogWarning($"[RuntimeAtlas] Add: Failed with result: {result}");
                 RuntimeAtlasProfiler.End(profiler);
 #endif
                 return (result, null);
@@ -383,14 +378,8 @@ namespace RuntimeAtlasPacker
                     var pageTexture = _textures[entry.TextureIndex];
                     // ✅ MEMORY FIX: Use makeNoLongerReadable to free CPU memory immediately
                     bool makeNoLongerReadable = !_settings.Readable;
-#if UNITY_EDITOR
-                    Debug.Log($"[RuntimeAtlas] Applying texture changes: Readable={_settings.Readable}, makeNoLongerReadable={makeNoLongerReadable}, TextureReadable={pageTexture.isReadable}");
-#endif
                     pageTexture.Apply(false, makeNoLongerReadable);
                     _isDirty = false;
-#if UNITY_EDITOR
-                    Debug.Log($"[RuntimeAtlas] After Apply: TextureReadable={pageTexture.isReadable}");
-#endif
                 }
                 catch (UnityException ex)
                 {
@@ -404,10 +393,9 @@ namespace RuntimeAtlasPacker
             ValidateNoOverlaps();
             
 #if UNITY_EDITOR
-            Debug.Log($"[RuntimeAtlas] Add: Complete. Entry ID: {entry.Id}, Page: {entry.TextureIndex}, Total entries: {_entries.Count}");
             RuntimeAtlasProfiler.End(profiler);
 #endif
-            return (AddResult.Success, entry);
+            return (AddResultType.Success, entry);
         }
 
         /// <summary>
@@ -421,14 +409,14 @@ namespace RuntimeAtlasPacker
         /// <param name="pixelsPerUnit">Pixels per unit value</param>
         /// <param name="spriteVersion">Optional sprite version number (default is 0)</param>
         /// <returns>A tuple containing the result status and an AtlasEntry reference (null if not successful).</returns>
-        public (AddResult result, AtlasEntry entry) Add(Texture2D texture, Vector4 border, Vector2 pivot, float pixelsPerUnit = 100f, int spriteVersion = 0)
+        public (AddResultType result, AtlasEntry entry) Add(Texture2D texture, Vector4 border, Vector2 pivot, float pixelsPerUnit = 100f, int spriteVersion = 0)
         {
             if (_isDisposed)
             {
 #if UNITY_EDITOR
                 Debug.LogWarning("[RuntimeAtlas.Add] Atlas is disposed");
 #endif
-                return (AddResult.Failed, null);
+                return (AddResultType.Failed, null);
             }
             
             if (texture == null)
@@ -436,7 +424,7 @@ namespace RuntimeAtlasPacker
 #if UNITY_EDITOR
                 Debug.LogWarning("[RuntimeAtlas.Add] Null texture provided");
 #endif
-                return (AddResult.InvalidTexture, null);
+                return (AddResultType.InvalidTexture, null);
             }
 
             // Validate pivot is in normalized range (0-1)
@@ -454,7 +442,7 @@ namespace RuntimeAtlasPacker
             // ✅ FIX: Check if texture is readable before proceeding
             if (!EnsureTextureReadable(texture))
             {
-                return (AddResult.InvalidTexture, null);
+                return (AddResultType.InvalidTexture, null);
             }
 
 #if UNITY_EDITOR
@@ -464,7 +452,7 @@ namespace RuntimeAtlasPacker
             // Use internal method for packing
             var (result, entry) = AddInternal(texture, border, pivot, pixelsPerUnit, spriteVersion);
             
-            if (result != AddResult.Success)
+            if (result != AddResultType.Success)
             {
 #if UNITY_EDITOR
                 Debug.LogWarning($"[RuntimeAtlas] Add: Failed with result: {result}");
@@ -497,7 +485,7 @@ namespace RuntimeAtlasPacker
 #if UNITY_EDITOR
             RuntimeAtlasProfiler.End(profiler);
 #endif
-            return (AddResult.Success, entry);
+            return (AddResultType.Success, entry);
         }
 
         /// <summary>
@@ -510,14 +498,14 @@ namespace RuntimeAtlasPacker
         /// <param name="texture">The texture to add</param>
         /// <param name="spriteVersion">Optional sprite version number (default is 0). If the same version already exists, the existing entry is returned.</param>
         /// <returns>A tuple containing the result status and an AtlasEntry reference (null if not successful).</returns>
-        public (AddResult result, AtlasEntry entry) Add(string name, Texture2D texture, int spriteVersion = 0)
+        public (AddResultType result, AtlasEntry entry) Add(string name, Texture2D texture, int spriteVersion = 0)
         {
             if (string.IsNullOrEmpty(name))
             {
 #if UNITY_EDITOR
                 Debug.LogWarning("[RuntimeAtlas.Add] Null or empty name provided");
 #endif
-                return (AddResult.InvalidTexture, null);
+                return (AddResultType.InvalidTexture, null);
             }
 
             // Check if entry with same name and version already exists
@@ -528,7 +516,7 @@ namespace RuntimeAtlasPacker
 #if UNITY_EDITOR
                     Debug.Log($"[RuntimeAtlas.Add] Entry '{name}' with version {spriteVersion} already exists, returning existing entry");
 #endif
-                    return (AddResult.Success, existingEntry);
+                    return (AddResultType.Success, existingEntry);
                 }
                 
                 // Different version - remove old and add new
@@ -541,7 +529,7 @@ namespace RuntimeAtlasPacker
             // Add the texture with version
             var (result, entry) = Add(texture, spriteVersion);
             
-            if (result == AddResult.Success && entry != null)
+            if (result == AddResultType.Success && entry != null)
             {
                 // Store in name dictionary
                 _entriesByName[name] = entry;
@@ -570,14 +558,14 @@ namespace RuntimeAtlasPacker
         /// <param name="name">The name of the entry to replace</param>
         /// <param name="texture">The new texture</param>
         /// <returns>A tuple containing the result status and an AtlasEntry reference</returns>
-        public (AddResult result, AtlasEntry entry) Replace(string name, Texture2D texture)
+        public (AddResultType result, AtlasEntry entry) Replace(string name, Texture2D texture)
         {
             if (string.IsNullOrEmpty(name))
             {
 #if UNITY_EDITOR
                 Debug.LogWarning("[RuntimeAtlas.Replace] Null or empty name provided");
 #endif
-                return (AddResult.InvalidTexture, null);
+                return (AddResultType.InvalidTexture, null);
             }
 
             bool hadExisting = ContainsName(name);
@@ -586,7 +574,7 @@ namespace RuntimeAtlasPacker
             var (result, entry) = Add(name, texture);
 
 #if UNITY_EDITOR
-            if (result == AddResult.Success)
+            if (result == AddResultType.Success)
             {
                 if (hadExisting)
                 {
@@ -612,14 +600,14 @@ namespace RuntimeAtlasPacker
         /// <param name="pivot">Pivot point of the sprite</param>
         /// <param name="pixelsPerUnit">Pixels per unit value</param>
         /// <returns>A tuple containing the result status and an AtlasEntry reference</returns>
-        public (AddResult result, AtlasEntry entry) Replace(string name, Texture2D texture, Vector4 border, Vector2 pivot, float pixelsPerUnit = 100f)
+        public (AddResultType result, AtlasEntry entry) Replace(string name, Texture2D texture, Vector4 border, Vector2 pivot, float pixelsPerUnit = 100f)
         {
             if (string.IsNullOrEmpty(name))
             {
 #if UNITY_EDITOR
                 Debug.LogWarning("[RuntimeAtlas.Replace] Null or empty name provided");
 #endif
-                return (AddResult.InvalidTexture, null);
+                return (AddResultType.InvalidTexture, null);
             }
 
             // Remove existing if present
@@ -631,7 +619,7 @@ namespace RuntimeAtlasPacker
             // Add with sprite properties
             var (result, entry) = Add(texture, border, pivot, pixelsPerUnit);
 
-            if (result == AddResult.Success && entry != null)
+            if (result == AddResultType.Success && entry != null)
             {
                 _entriesByName[name] = entry;
             }
@@ -966,7 +954,7 @@ namespace RuntimeAtlasPacker
                 // Try to pack without blitting
                 var (result, pageIndex, packedRect) = TryPackTextureInternal(tex, spriteVersion);
                 
-                if (result == AddResult.Success)
+                if (result == AddResultType.Success)
                 {
                     // Calculate rects but don't blit yet
                     var contentRect = new RectInt(
@@ -1009,7 +997,7 @@ namespace RuntimeAtlasPacker
 #endif
                     
                     // If atlas is full, stop trying to add more
-                    if (result == AddResult.Full)
+                    if (result == AddResultType.Full)
                     {
 #if UNITY_EDITOR
                         Debug.LogWarning($"[RuntimeAtlas] AddBatch: Atlas full after {successCount} textures. Stopping batch.");
@@ -1259,7 +1247,7 @@ namespace RuntimeAtlasPacker
                 }
                 
                 var (result, entry) = AddInternal(tex, version);
-                if (result == AddResult.Success && entry != null)
+                if (result == AddResultType.Success && entry != null)
                 {
                     // Store in name dictionary
                     _entriesByName[key] = entry;
@@ -1278,7 +1266,7 @@ namespace RuntimeAtlasPacker
 #endif
                     
                     // If atlas is full, stop trying to add more
-                    if (result == AddResult.Full)
+                    if (result == AddResultType.Full)
                     {
 #if UNITY_EDITOR
                         Debug.LogWarning($"[RuntimeAtlas] AddBatch: Atlas full after {successCount} textures. Stopping batch.");
@@ -1588,12 +1576,12 @@ namespace RuntimeAtlasPacker
         /// Internal add method that doesn't call Apply - for batch operations
         /// Automatically creates new page if current page is full.
         /// </summary>
-        private (AddResult result, AtlasEntry entry) AddInternal(Texture2D texture, int spriteVersion = 0)
+        private (AddResultType result, AtlasEntry entry) AddInternal(Texture2D texture, int spriteVersion = 0)
         {
             if (texture == null)
             {
                 Debug.LogWarning("[RuntimeAtlas.AddInternal] NULL texture provided");
-                return (AddResult.InvalidTexture, null);
+                return (AddResultType.InvalidTexture, null);
             }
 
             Debug.Log($"[RuntimeAtlas.AddInternal] START - texture: '{texture.name}', size: {texture.width}x{texture.height}, format: {texture.format}, version: {spriteVersion}");
@@ -1605,7 +1593,7 @@ namespace RuntimeAtlasPacker
             if (texture.width > _settings.MaxSize || texture.height > _settings.MaxSize)
             {
                 Debug.LogError($"[RuntimeAtlas.AddInternal] Texture '{texture.name}' ({texture.width}x{texture.height}) exceeds MaxSize ({_settings.MaxSize})");
-                return (AddResult.TooLarge, null);
+                return (AddResultType.TooLarge, null);
             }
 
             Debug.Log($"[RuntimeAtlas.AddInternal] Attempting to pack '{texture.name}' in current page {_currentPageIndex}");
@@ -1642,7 +1630,7 @@ namespace RuntimeAtlasPacker
                     if (!canCreatePage)
                     {
                         Debug.LogError($"[RuntimeAtlas.AddInternal] Cannot add texture '{texture.name}': Atlas has reached maximum page limit ({_settings.MaxPageCount} pages) and all pages are full!");
-                        return (AddResult.Full, null);
+                        return (AddResultType.Full, null);
                     }
                     
                     Debug.Log($"[RuntimeAtlas.AddInternal] Creating new page for '{texture.name}'");
@@ -1656,7 +1644,7 @@ namespace RuntimeAtlasPacker
                     if (!packed)
                     {
                         Debug.LogError($"[RuntimeAtlas.AddInternal] Failed to pack '{texture.name}' even in new page! This should not happen.");
-                        return (AddResult.Full, null);
+                        return (AddResultType.Full, null);
                     }
                     Debug.Log($"[RuntimeAtlas.AddInternal] Successfully packed in new page {pageIndex}");
                 }
@@ -1689,7 +1677,7 @@ namespace RuntimeAtlasPacker
             {
                 Debug.LogError($"[RuntimeAtlas.AddInternal] ✗ BLIT FAILED for '{texture.name}': {ex.GetType().Name} - {ex.Message}");
                 Debug.LogError($"[RuntimeAtlas.AddInternal] Stack trace: {ex.StackTrace}");
-                return (AddResult.Failed, null);
+                return (AddResultType.Failed, null);
             }
             
             // Calculate UV - ✅ FIX: Ensure float division for precision
@@ -1720,20 +1708,20 @@ namespace RuntimeAtlasPacker
             }
 
             Debug.Log($"[RuntimeAtlas.AddInternal] ✓ COMPLETE for '{texture.name}' - Entry ID: {id}");
-            return (AddResult.Success, entry);
+            return (AddResultType.Success, entry);
         }
 
         /// <summary>
         /// Internal add method with sprite properties that doesn't call Apply - for batch operations
         /// </summary>
-        private (AddResult result, AtlasEntry entry) AddInternal(Texture2D texture, Vector4 border, Vector2 pivot, float pixelsPerUnit, int spriteVersion = 0)
+        private (AddResultType result, AtlasEntry entry) AddInternal(Texture2D texture, Vector4 border, Vector2 pivot, float pixelsPerUnit, int spriteVersion = 0)
         {
             if (texture == null)
             {
 #if UNITY_EDITOR
                 Debug.LogWarning("[RuntimeAtlas.AddInternal] NULL TEXTURE passed!");
 #endif
-                return (AddResult.InvalidTexture, null);
+                return (AddResultType.InvalidTexture, null);
             }
 
 #if UNITY_EDITOR
@@ -1749,7 +1737,7 @@ namespace RuntimeAtlasPacker
 #if UNITY_EDITOR
                 Debug.LogError($"[RuntimeAtlas.AddInternal] Texture '{texture.name}' ({texture.width}x{texture.height}) exceeds MaxSize ({_settings.MaxSize})");
 #endif
-                return (AddResult.TooLarge, null);
+                return (AddResultType.TooLarge, null);
             }
 
             // Try to pack in current page first
@@ -1784,7 +1772,7 @@ namespace RuntimeAtlasPacker
 #if UNITY_EDITOR
                         Debug.LogError($"[RuntimeAtlas.AddInternal] Cannot add texture '{texture.name}': Atlas full!");
 #endif
-                        return (AddResult.Full, null);
+                        return (AddResultType.Full, null);
                     }
                     
                     CreateNewPage();
@@ -1796,7 +1784,7 @@ namespace RuntimeAtlasPacker
 #if UNITY_EDITOR
                         Debug.LogError($"[RuntimeAtlas.AddInternal] Failed to pack '{texture.name}' even in new page!");
 #endif
-                        return (AddResult.Full, null);
+                        return (AddResultType.Full, null);
                     }
                 }
             }
@@ -1819,7 +1807,7 @@ namespace RuntimeAtlasPacker
 #if UNITY_EDITOR
                 Debug.LogError($"[RuntimeAtlas.AddInternal] BLIT FAILED for '{texture.name}': {ex.Message}");
 #endif
-                return (AddResult.Failed, null);
+                return (AddResultType.Failed, null);
             }
             
             // Calculate UV - ✅ FIX: Ensure float division for precision
@@ -1847,18 +1835,18 @@ namespace RuntimeAtlasPacker
                 RepackPage(pageIndex);
             }
 
-            return (AddResult.Success, entry);
+            return (AddResultType.Success, entry);
         }
 
         /// <summary>
         /// Try to pack a texture and return its position without blitting.
         /// Used for batch operations to collect all packing info before blitting.
         /// </summary>
-        private (AddResult result, int pageIndex, RectInt packedRect) TryPackTextureInternal(Texture2D texture, int spriteVersion = 0)
+        private (AddResultType result, int pageIndex, RectInt packedRect) TryPackTextureInternal(Texture2D texture, int spriteVersion = 0)
         {
             if (texture == null)
             {
-                return (AddResult.InvalidTexture, -1, default);
+                return (AddResultType.InvalidTexture, -1, default);
             }
 
             var width = texture.width + _settings.Padding * 2;
@@ -1867,7 +1855,7 @@ namespace RuntimeAtlasPacker
             // Check if texture is too large to ever fit
             if (texture.width > _settings.MaxSize || texture.height > _settings.MaxSize)
             {
-                return (AddResult.TooLarge, -1, default);
+                return (AddResultType.TooLarge, -1, default);
             }
 
             // Try to pack in current page first
@@ -1900,7 +1888,7 @@ namespace RuntimeAtlasPacker
                     
                     if (!canCreatePage)
                     {
-                        return (AddResult.Full, -1, default);
+                        return (AddResultType.Full, -1, default);
                     }
                     
                     // Create new page
@@ -1912,12 +1900,12 @@ namespace RuntimeAtlasPacker
                     
                     if (!packed)
                     {
-                        return (AddResult.Full, -1, default);
+                        return (AddResultType.Full, -1, default);
                     }
                 }
             }
 
-            return (AddResult.Success, pageIndex, packedRect);
+            return (AddResultType.Success, pageIndex, packedRect);
         }
 
         private bool TryPackInPage(int pageIndex, int width, int height, out RectInt packedRect)

@@ -53,7 +53,7 @@ namespace Packages.UnityRuntimeAtlas.Tests.Runtime
 
                 // Add to atlas
                 var (result, _) = atlas.Add(texture);
-                Assert.AreEqual(AddResult.Success, result);
+                Assert.AreEqual(AddResultType.Success, result);
                 
                 // Cleanup source
                 Object.Destroy(texture);
@@ -173,7 +173,7 @@ namespace Packages.UnityRuntimeAtlas.Tests.Runtime
                 texture.name = "RedSquare";
 
                 var (result, _) = atlas.Add(texture);
-                Assert.AreEqual(AddResult.Success, result);
+                Assert.AreEqual(AddResultType.Success, result);
                 Object.Destroy(texture);
 
                 var success = await atlas.SaveAsync(_testFilePath);
@@ -243,7 +243,7 @@ namespace Packages.UnityRuntimeAtlas.Tests.Runtime
                 tex1.name = "RedSquare";
                 
                 var (result1, _) = atlas.Add(tex1);
-                Assert.AreEqual(AddResult.Success, result1);
+                Assert.AreEqual(AddResultType.Success, result1);
                 Object.Destroy(tex1);
 
                 // Add second sprite (green)
@@ -255,7 +255,7 @@ namespace Packages.UnityRuntimeAtlas.Tests.Runtime
                 tex2.name = "GreenSquare";
                 
                 var (result2, _) = atlas.Add(tex2);
-                Assert.AreEqual(AddResult.Success, result2);
+                Assert.AreEqual(AddResultType.Success, result2);
                 Object.Destroy(tex2);
 
                 Assert.AreEqual(2, atlas.EntryCount, "Should have 2 entries before save");
@@ -283,7 +283,7 @@ namespace Packages.UnityRuntimeAtlas.Tests.Runtime
             tex3.name = "BlueSquare";
             
             var (result3, _) = loadedAtlas.Add(tex3);
-            Assert.AreEqual(AddResult.Success, result3, "Should be able to add to loaded atlas");
+            Assert.AreEqual(AddResultType.Success, result3, "Should be able to add to loaded atlas");
             Object.Destroy(tex3);
             
             Assert.AreEqual(3, loadedAtlas.EntryCount, "Should have 3 entries after adding");
@@ -423,7 +423,7 @@ namespace Packages.UnityRuntimeAtlas.Tests.Runtime
             {
                 var tex = CreateColoredTexture(32, 32, Color.cyan, "DetailedSprite");
                 var (result, _) = atlas.Add(tex, spriteBorder, spritePivot, pixelsPerUnit, spriteVersion);
-                Assert.AreEqual(AddResult.Success, result);
+                Assert.AreEqual(AddResultType.Success, result);
                 Object.Destroy(tex);
                 
                 await atlas.SaveAsync(_testFilePath);

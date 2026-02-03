@@ -198,7 +198,7 @@ namespace RuntimeAtlasPacker
                     : AtlasPacker.GetOrCreate(_targetAtlasName);
 
                 var (result, entry) = atlas.Add(texture);
-                if (result == AddResult.Success && entry != null)
+                if (result == AddResultType.Success && entry != null)
                 {
                     SetEntry(entry);
                 }
@@ -257,7 +257,7 @@ namespace RuntimeAtlasPacker
             // For true async, we would need to wrap this in Task.Run but Unity API calls must be on main thread
             var (result, entry) = atlas.Add(texture);
 
-            if (!_isDestroyed && result == AddResult.Success)
+            if (!_isDestroyed && result == AddResultType.Success)
             {
                 SetEntry(entry);
             }

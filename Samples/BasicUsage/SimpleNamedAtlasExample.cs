@@ -186,7 +186,7 @@ public class SimpleNamedAtlasExample : MonoBehaviour
                         // Add to atlas with name
                         var (result, entry) = atlas.Add(imageName, downloadedTexture);
                         
-                        if (result == AddResult.Success)
+                        if (result == AddResultType.Success)
                         {
                             Debug.Log($"✓ Added '{imageName}' to atlas (Entry ID: {entry.Id})");
                             

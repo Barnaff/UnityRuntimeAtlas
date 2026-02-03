@@ -273,7 +273,7 @@ namespace RuntimeAtlasPacker.Samples
 
             _atlas = new RuntimeAtlas();
             var (result, entry) = _atlas.Add(pathTexture);
-            if (result != AddResult.Success || entry == null)
+            if (result != AddResultType.Success || entry == null)
             {
                 Debug.LogWarning($"Failed to add path texture to atlas: {result}");
                 return;
