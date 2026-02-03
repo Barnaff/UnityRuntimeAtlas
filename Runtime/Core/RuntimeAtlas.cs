@@ -513,16 +513,10 @@ namespace RuntimeAtlasPacker
             {
                 if (existingEntry.SpriteVersion == spriteVersion)
                 {
-#if UNITY_EDITOR
-                    Debug.Log($"[RuntimeAtlas.Add] Entry '{name}' with version {spriteVersion} already exists, returning existing entry");
-#endif
                     return (AddResultType.Success, existingEntry);
                 }
                 
                 // Different version - remove old and add new
-#if UNITY_EDITOR
-                Debug.Log($"[RuntimeAtlas.Add] Replacing '{name}' version {existingEntry.SpriteVersion} with version {spriteVersion}");
-#endif
                 RemoveById(existingEntry.Id);
             }
 
@@ -573,19 +567,6 @@ namespace RuntimeAtlasPacker
             // Use Add with name - it already handles replacement
             var (result, entry) = Add(name, texture);
 
-#if UNITY_EDITOR
-            if (result == AddResultType.Success)
-            {
-                if (hadExisting)
-                {
-                    Debug.Log($"[RuntimeAtlas.Replace] Replaced existing entry '{name}'");
-                }
-                else
-                {
-                    Debug.Log($"[RuntimeAtlas.Replace] Added new entry '{name}' (didn't exist before)");
-                }
-            }
-#endif
 
             return (result, entry);
         }
