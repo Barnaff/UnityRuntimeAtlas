@@ -4,8 +4,6 @@ using UnityEngine.Rendering;
 
 namespace RuntimeAtlasPacker
 {
-    // Enable detailed memory diagnostics - set to false for production
-    // #define ATLAS_MEMORY_DIAGNOSTICS
     /// <summary>
     /// GPU-accelerated texture blitting operations.
     /// Falls back to CPU when GPU blit is not available.
@@ -20,9 +18,9 @@ namespace RuntimeAtlasPacker
             if (_materialInitialized) return;
             _materialInitialized = true;
 
-            // ✅ IMPROVED: Load pre-built material from Resources for build compatibility
+            // Load pre-built material from Resources for build compatibility
             _blitMaterial = Resources.Load<Material>("AtlasBlitMaterial");
-            
+
             if (_blitMaterial == null)
             {
                 // Fallback: Try to find the shader and create material
@@ -32,7 +30,7 @@ namespace RuntimeAtlasPacker
                     // Last resort fallback to Unity's built-in blit shader
                     shader = Shader.Find("Hidden/BlitCopy");
                 }
-                
+
                 if (shader != null)
                 {
                     _blitMaterial = new Material(shader);
@@ -47,24 +45,20 @@ namespace RuntimeAtlasPacker
         /// </summary>
         public static void Blit(Texture2D source, Texture2D target, int x, int y)
         {
-            Debug.Log($"[TextureBlitter.Blit] ========== SINGLE BLIT START ==========");
-            
             if (source == null || target == null)
             {
                 Debug.LogError($"[TextureBlitter.Blit] NULL parameter - source: {source != null}, target: {target != null}");
                 throw new ArgumentNullException();
             }
 
+#if UNITY_EDITOR
             Debug.Log($"[TextureBlitter.Blit] Source: '{source.name}', {source.width}x{source.height}, Format: {source.format}, Readable: {source.isReadable}");
             Debug.Log($"[TextureBlitter.Blit] Target: '{target.name}', {target.width}x{target.height}, Format: {target.format}, Readable: {target.isReadable}");
             Debug.Log($"[TextureBlitter.Blit] Position: ({x}, {y})");
-            Debug.Log($"[TextureBlitter.Blit] Memory before blit: {System.GC.GetTotalMemory(false) / (1024 * 1024)}MB");
+#endif
 
             // Use Material-based rendering - works with ALL textures
             BlitWithMaterial(source, target, x, y);
-            
-            Debug.Log($"[TextureBlitter.Blit] Memory after blit: {System.GC.GetTotalMemory(false) / (1024 * 1024)}MB");
-            Debug.Log($"[TextureBlitter.Blit] ========== SINGLE BLIT END ==========");
         }
 
         /// <summary>
@@ -78,76 +72,19 @@ namespace RuntimeAtlasPacker
             if (target == null || operations == null || operations.Length == 0)
                 return;
 
-            // ✅ DIAGNOSTIC: Detailed texture info for crash debugging
-            Debug.Log($"[TextureBlitter.BatchBlit] ========== BATCH BLIT START ==========");
-
-            // Use MemoryDiagnostics for comprehensive memory state
-            MemoryDiagnostics.LogMemoryState("BatchBlit START");
-            MemoryDiagnostics.LogTextureInfo(target, "Target Atlas");
-
+#if UNITY_EDITOR
+            Debug.Log($"[TextureBlitter.BatchBlit] Target: {target.name}, {target.width}x{target.height}, Format: {target.format}, Readable: {target.isReadable}");
             Debug.Log($"[TextureBlitter.BatchBlit] Operations count: {operations.Length}");
-
-            // Check for critical memory before proceeding
-            if (MemoryDiagnostics.IsMemoryCritical())
-            {
-                Debug.LogWarning($"[TextureBlitter.BatchBlit] WARNING: Memory is critical! Forcing GC before batch blit...");
-                MemoryDiagnostics.ForceGCAndLog("Pre-BatchBlit cleanup");
-            }
-
-            // Log each source texture for debugging
-            long totalSourceMemory = 0;
-            for (int i = 0; i < operations.Length; i++)
-            {
-                var (src, x, y) = operations[i];
-                if (src != null)
-                {
-                    var srcMemory = MemoryDiagnostics.EstimateTextureMemory(src);
-                    totalSourceMemory += srcMemory;
-                    Debug.Log($"[TextureBlitter.BatchBlit] Source[{i}]: {src.name}, Size: {src.width}x{src.height}, Format: {src.format}, Readable: {src.isReadable}, Pos: ({x},{y}), Est.Memory: {srcMemory / 1024}KB");
-                }
-                else
-                {
-                    Debug.LogWarning($"[TextureBlitter.BatchBlit] Source[{i}]: NULL!");
-                }
-            }
-            Debug.Log($"[TextureBlitter.BatchBlit] Total source textures memory: {totalSourceMemory / 1024 / 1024} MB");
+#endif
 
             EnsureMaterial();
 
             RenderTexture rt = null;
             RenderTexture prevActive = RenderTexture.active;
-            
-#if UNITY_IOS
-            // ✅ iOS MEMORY CRITICAL FIX: Force cleanup BEFORE allocating large RenderTexture
-            // RenderTextures use NATIVE (GPU) memory which is NOT tracked by GC.GetTotalMemory()
-            // iOS has strict limits on native memory - must aggressively clean up old RenderTextures
-            var rtSizeMB = (target.width * target.height * 4) / 1024 / 1024; // RGBA32 size estimate
-            
-            if (rtSizeMB > 16) // If allocating > 16MB RenderTexture
-            {
-                // Force Unity to release all temporary RenderTextures from the pool
-                // This is CRITICAL on iOS to prevent native memory accumulation
-                var memBefore = System.GC.GetTotalMemory(false) / 1024 / 1024;
-                
-                // Clean up managed memory
-                System.GC.Collect();
-                System.GC.WaitForPendingFinalizers();
-                
-                // CRITICAL: Force Unity to clear RenderTexture pool
-                // This releases native GPU memory that GC can't see
-                RenderTexture.ReleaseTemporary(null); // null call forces pool cleanup
-                
-                var memAfter = System.GC.GetTotalMemory(false) / 1024 / 1024;
-                Debug.Log($"[TextureBlitter.BatchBlit] iOS: Cleaned up before allocating {rtSizeMB}MB RenderTexture. Managed memory: {memBefore}MB → {memAfter}MB");
-            }
-#endif
-            
+
             try
             {
-                Debug.Log($"[TextureBlitter.BatchBlit] STEP 1: Allocating RenderTexture {target.width}x{target.height}...");
-                Debug.Log($"[TextureBlitter.BatchBlit] RT Format: ARGB32 (will need conversion to {target.format})");
-
-                // Create RenderTexture matching target size ONCE
+                // Create RenderTexture matching target size
                 rt = RenderTexture.GetTemporary(
                     target.width,
                     target.height,
@@ -157,39 +94,19 @@ namespace RuntimeAtlasPacker
                 );
                 rt.filterMode = FilterMode.Point;
 
-                Debug.Log($"[TextureBlitter.BatchBlit] STEP 1 COMPLETE: RenderTexture allocated");
-                Debug.Log($"[TextureBlitter.BatchBlit] RT Created: {rt.IsCreated()}, RT Format: {rt.format}, RT Dimension: {rt.dimension}");
-                
-                // ✅ iOS FIX: Only preserve existing content if texture is readable
-                // Non-readable textures can't be read from, and typically have no content to preserve anyway
-                Debug.Log($"[TextureBlitter.BatchBlit] STEP 2: Preserving existing content...");
-
-                if (target.isReadable)
-                {
-                    Debug.Log($"[TextureBlitter.BatchBlit] STEP 2a: Blitting target to RT (readable texture)...");
-                    Graphics.Blit(target, rt);
-                    Debug.Log($"[TextureBlitter.BatchBlit] STEP 2a COMPLETE");
-                }
-                else
-                {
-                    Debug.Log($"[TextureBlitter.BatchBlit] STEP 2a: Clearing RT (non-readable texture)...");
-                    // Clear the RenderTexture since we can't preserve content from non-readable texture
-                    RenderTexture.active = rt;
-                    GL.Clear(true, true, Color.clear);
-                    RenderTexture.active = null;
-                    Debug.Log($"[TextureBlitter.BatchBlit] STEP 2a COMPLETE");
-                }
+                // BUG FIX: Preserve existing atlas content via GPU blit.
+                // Graphics.Blit works with BOTH readable and non-readable textures
+                // because it samples the texture via a shader (GPU operation).
+                // Previously, non-readable textures were cleared with GL.Clear,
+                // which destroyed all previously-added sprites in the atlas.
+                Graphics.Blit(target, rt);
 
                 // Activate RT for rendering
-                Debug.Log($"[TextureBlitter.BatchBlit] STEP 3: Setting up GL context for drawing...");
                 RenderTexture.active = rt;
 
                 Material blitMat = GetBlitMaterial();
-                Debug.Log($"[TextureBlitter.BatchBlit] BlitMaterial: {(blitMat != null ? blitMat.name : "NULL")}");
 
                 // Batch all draw operations
-                Debug.Log($"[TextureBlitter.BatchBlit] STEP 4: Drawing {operations.Length} sprites to RenderTexture...");
-
                 GL.PushMatrix();
                 GL.LoadPixelMatrix(0, target.width, target.height, 0);
 
@@ -198,15 +115,15 @@ namespace RuntimeAtlasPacker
                     var (source, x, y) = operations[i];
                     if (source == null)
                     {
+#if UNITY_EDITOR
                         Debug.LogWarning($"[TextureBlitter.BatchBlit] Skipping NULL source at index {i}");
+#endif
                         continue;
                     }
 
                     // Flip Y coordinate
                     float yFlipped = target.height - y - source.height;
                     Rect destRect = new Rect(x, yFlipped, source.width, source.height);
-
-                    Debug.Log($"[TextureBlitter.BatchBlit] Drawing sprite {i}: '{source.name}' at ({x},{y}) -> rect({destRect.x},{destRect.y},{destRect.width},{destRect.height})");
 
                     if (blitMat != null)
                     {
@@ -222,160 +139,16 @@ namespace RuntimeAtlasPacker
                 GL.PopMatrix();
                 RenderTexture.active = null;
 
-                Debug.Log($"[TextureBlitter.BatchBlit] STEP 4 COMPLETE: All sprites drawn to RenderTexture");
+                // Copy RT back to target texture
+                CopyRenderTextureToTexture(rt, target);
 
-                // ✅ iOS CRITICAL FIX: Use ReadPixels for readable textures to handle format conversion safely
-                Debug.Log($"[TextureBlitter.BatchBlit] STEP 5: Copying RT back to target texture...");
-                Debug.Log($"[TextureBlitter.BatchBlit] RT Info - Width: {rt.width}, Height: {rt.height}, Format: {rt.format}, IsCreated: {rt.IsCreated()}");
-
-#if UNITY_IOS
-                // ✅ iOS CRITICAL FIX: Format compatibility check for CopyTexture
-                // Graphics.CopyTexture REQUIRES compatible formats between source and destination.
-                // RenderTexture uses ARGB32 but atlas textures use RGBA32 - these are INCOMPATIBLE!
-                // On iOS Metal, format mismatch causes DEFERRED crash in BlitterRemap during sprite access.
-                //
-                // SOLUTION: For READABLE textures, always use ReadPixels (handles format conversion safely).
-                // Only use CopyTexture for NON-READABLE textures where ReadPixels can't work.
-
-                // Check if formats are compatible for CopyTexture
-                bool batchFormatsCompatible = (rt.format == RenderTextureFormat.ARGB32 && target.format == TextureFormat.ARGB32) ||
-                                              (rt.format == RenderTextureFormat.BGRA32 && target.format == TextureFormat.BGRA32);
-
-                // Only use GPU-only path for NON-READABLE textures (where ReadPixels won't work)
-                // For READABLE textures, always use ReadPixels to safely handle format conversion
-                bool useGPUOnly = !target.isReadable && (target.width >= 2048 || target.height >= 2048);
-                if (useGPUOnly)
-                {
-                    Debug.Log($"[TextureBlitter.BatchBlit] iOS: Non-readable large texture ({target.width}x{target.height}), must use CopyTexture...");
-                    Debug.Log($"[TextureBlitter.BatchBlit] iOS: RT format: {rt.format}, Target format: {target.format}, Formats compatible: {batchFormatsCompatible}");
-
-                    if (!batchFormatsCompatible)
-                    {
-                        Debug.LogWarning($"[TextureBlitter.BatchBlit] iOS: FORMAT MISMATCH WARNING - RT:{rt.format} vs Target:{target.format}. This may cause issues!");
-                    }
-
-                    Debug.Log($"[TextureBlitter.BatchBlit] >>> ABOUT TO CALL Graphics.CopyTexture <<<");
-
-                    try
-                    {
-                        // GPU-only copy - no CPU memory allocation
-                        Graphics.CopyTexture(rt, target);
-                        Debug.Log($"[TextureBlitter.BatchBlit] Graphics.CopyTexture completed successfully");
-
-                        // Force GPU to complete the copy operation
-                        Debug.Log($"[TextureBlitter.BatchBlit] iOS: Forcing GPU flush...");
-                        GL.Flush();
-                        Debug.Log($"[TextureBlitter.BatchBlit] iOS: GPU flush complete");
-                    }
-                    catch (System.Exception copyEx)
-                    {
-                        Debug.LogError($"[TextureBlitter.BatchBlit] ✗ Graphics.CopyTexture FAILED: {copyEx.Message}\n{copyEx.StackTrace}");
-                        throw;
-                    }
-
-                    Debug.Log($"[TextureBlitter.BatchBlit] ✓ BATCH BLIT COMPLETE");
-                    MemoryDiagnostics.LogMemoryState("BatchBlit END");
-                    Debug.Log($"[TextureBlitter.BatchBlit] ========== BATCH BLIT END ==========");
-                    return; // Skip ReadPixels path
-                }
-
-                // For readable textures on iOS, log that we're using the safe ReadPixels path
-                if (target.isReadable && (target.width >= 2048 || target.height >= 2048))
-                {
-                    Debug.Log($"[TextureBlitter.BatchBlit] iOS: Large READABLE texture ({target.width}x{target.height}), using ReadPixels (safe format conversion)...");
-                }
-#endif
-
-                // For smaller textures or non-iOS, use appropriate method based on readability
-                if (target.isReadable)
-                {
-                    Debug.Log($"[TextureBlitter.BatchBlit] STEP 5a: Using ReadPixels (readable texture)...");
-                    Debug.Log($"[TextureBlitter.BatchBlit] >>> ABOUT TO CALL ReadPixels - THIS IS WHERE CRASH MAY OCCUR <<<");
-                    Debug.Log($"[TextureBlitter.BatchBlit] ReadPixels params: Rect(0, 0, {rt.width}, {rt.height}), destX: 0, destY: 0");
-
-                    // For READABLE textures: Use ReadPixels to update CPU memory
-                    RenderTexture.active = rt;
-
-                    try
-                    {
-                        target.ReadPixels(new Rect(0, 0, rt.width, rt.height), 0, 0, false);
-                        Debug.Log($"[TextureBlitter.BatchBlit] ReadPixels completed successfully");
-                    }
-                    catch (System.Exception readEx)
-                    {
-                        Debug.LogError($"[TextureBlitter.BatchBlit] ✗ ReadPixels FAILED: {readEx.Message}\n{readEx.StackTrace}");
-                        throw;
-                    }
-
-                    RenderTexture.active = null;
-
-                    Debug.Log($"[TextureBlitter.BatchBlit] STEP 5b: Calling Apply()...");
-                    Debug.Log($"[TextureBlitter.BatchBlit] >>> ABOUT TO CALL Apply - THIS IS WHERE CRASH MAY OCCUR <<<");
-
-                    try
-                    {
-                        // Apply immediately to upload to GPU
-                        target.Apply(false, false);
-                        Debug.Log($"[TextureBlitter.BatchBlit] Apply completed successfully");
-
-#if UNITY_IOS
-                        // ✅ iOS CRITICAL FIX: Force GPU to complete all pending texture uploads
-                        // On iOS Metal, Apply() schedules a DEFERRED upload. If we return immediately,
-                        // another operation (like atlas save) might access the texture before upload completes.
-                        // GL.Flush() forces all pending GPU operations to complete.
-                        Debug.Log($"[TextureBlitter.BatchBlit] iOS: Forcing GPU flush to complete texture upload...");
-                        GL.Flush();
-                        Debug.Log($"[TextureBlitter.BatchBlit] iOS: GPU flush complete");
-#endif
-                    }
-                    catch (System.Exception applyEx)
-                    {
-                        Debug.LogError($"[TextureBlitter.BatchBlit] ✗ Apply FAILED: {applyEx.Message}\n{applyEx.StackTrace}");
-                        throw;
-                    }
-                }
-                else
-                {
-                    Debug.Log($"[TextureBlitter.BatchBlit] STEP 5a: Using Graphics.CopyTexture (non-readable texture)...");
-                    Debug.Log($"[TextureBlitter.BatchBlit] >>> ABOUT TO CALL CopyTexture - THIS IS WHERE CRASH MAY OCCUR <<<");
-
-                    try
-                    {
-                        // For NON-READABLE textures: Use Graphics.CopyTexture (GPU-only)
-                        Graphics.CopyTexture(rt, target);
-                        Debug.Log($"[TextureBlitter.BatchBlit] CopyTexture completed successfully");
-
-#if UNITY_IOS
-                        // ✅ iOS CRITICAL FIX: Force GPU to complete the copy operation
-                        Debug.Log($"[TextureBlitter.BatchBlit] iOS: Forcing GPU flush after CopyTexture...");
-                        GL.Flush();
-                        Debug.Log($"[TextureBlitter.BatchBlit] iOS: GPU flush complete");
-#endif
-                    }
-                    catch (System.Exception copyEx)
-                    {
-                        Debug.LogError($"[TextureBlitter.BatchBlit] ✗ CopyTexture FAILED: {copyEx.Message}\n{copyEx.StackTrace}");
-                        throw;
-                    }
-                }
-
-                Debug.Log($"[TextureBlitter.BatchBlit] ✓ BATCH BLIT COMPLETE");
-                MemoryDiagnostics.LogMemoryState("BatchBlit END");
-                Debug.Log($"[TextureBlitter.BatchBlit] ========== BATCH BLIT END ==========");
-
-#if UNITY_IOS
-                // ✅ iOS MEMORY FIX: Force cleanup of temporary allocations after large operation
-                if (target.width >= 1024 || target.height >= 1024)
-                {
-                    Resources.UnloadUnusedAssets();
-                }
+#if UNITY_EDITOR
+                Debug.Log($"[TextureBlitter.BatchBlit] Batch blit complete ({operations.Length} operations)");
 #endif
             }
-            catch (System.Exception ex)
+            catch (Exception ex)
             {
-#if UNITY_EDITOR || UNITY_IOS
-                Debug.LogError($"[TextureBlitter.BatchBlit] ✗ CRASH during batch blit: {ex.Message}\nStack: {ex.StackTrace}");
-#endif
+                Debug.LogError($"[TextureBlitter.BatchBlit] CRASH during batch blit: {ex.Message}\nStack: {ex.StackTrace}");
                 throw;
             }
             finally
@@ -383,9 +156,6 @@ namespace RuntimeAtlasPacker
                 RenderTexture.active = prevActive;
                 if (rt != null)
                 {
-#if UNITY_EDITOR || UNITY_IOS
-                    Debug.Log($"[TextureBlitter.BatchBlit] Releasing RenderTexture...");
-#endif
                     RenderTexture.ReleaseTemporary(rt);
                     rt = null;
                 }
@@ -402,13 +172,66 @@ namespace RuntimeAtlasPacker
             if (sourceFormat == targetFormat)
                 return true;
 
-            // Graphics.CopyTexture requires same memory layout
-            // RGB24 (3 bytes) != RGBA32 (4 bytes) - incompatible
-            // Different compressed formats - incompatible
-            // Different bit depths - incompatible
-
             // For safety, only allow exact matches
             return false;
+        }
+
+        /// <summary>
+        /// Safely copy a RenderTexture back to a Texture2D, handling format differences
+        /// and readable/non-readable textures correctly on all platforms including iOS Metal.
+        /// </summary>
+        private static void CopyRenderTextureToTexture(RenderTexture rt, Texture2D target)
+        {
+            if (target.isReadable)
+            {
+                // READABLE textures: Use ReadPixels which safely handles format conversion
+                // from RenderTexture (ARGB32) to any Texture2D format.
+                RenderTexture.active = rt;
+                target.ReadPixels(new Rect(0, 0, rt.width, rt.height), 0, 0, false);
+                RenderTexture.active = null;
+                target.Apply(false, false);
+
+#if UNITY_IOS
+                // iOS Metal: Apply() schedules a DEFERRED upload. GL.Flush() ensures
+                // the upload completes before any subsequent operations.
+                GL.Flush();
+#endif
+            }
+            else
+            {
+                // NON-READABLE textures: Cannot use ReadPixels.
+                // Graphics.CopyTexture requires compatible formats between RT and Texture2D.
+                // On iOS Metal, RenderTextureFormat.ARGB32 may map to a different internal
+                // pixel format than TextureFormat.ARGB32, causing deferred crashes in BlitterRemap.
+                //
+                // SAFE APPROACH: Use a temporary readable Texture2D as an intermediate.
+                // ReadPixels handles format conversion safely, then CopyTexture between
+                // two Texture2Ds with the same TextureFormat is guaranteed compatible.
+#if UNITY_IOS
+                var temp = new Texture2D(rt.width, rt.height, target.format, false);
+                try
+                {
+                    RenderTexture.active = rt;
+                    temp.ReadPixels(new Rect(0, 0, rt.width, rt.height), 0, 0, false);
+                    RenderTexture.active = null;
+                    temp.Apply(false, false);
+
+                    Graphics.CopyTexture(temp, target);
+                    GL.Flush();
+                }
+                finally
+                {
+                    RenderTexture.active = null;
+                    if (Application.isPlaying)
+                        UnityEngine.Object.Destroy(temp);
+                    else
+                        UnityEngine.Object.DestroyImmediate(temp);
+                }
+#else
+                // On non-iOS platforms, CopyTexture between RT and Texture2D is generally safe
+                Graphics.CopyTexture(rt, target);
+#endif
+            }
         }
 
         /// <summary>
@@ -418,35 +241,21 @@ namespace RuntimeAtlasPacker
         /// </summary>
         private static void BlitWithMaterial(Texture2D source, Texture2D target, int x, int y)
         {
-            Debug.Log($"[TextureBlitter.BlitWithMaterial] ========== SINGLE BLIT START ==========");
-            Debug.Log($"[TextureBlitter.BlitWithMaterial] Source: {source.name}, Size: {source.width}x{source.height}, Format: {source.format}");
-            Debug.Log($"[TextureBlitter.BlitWithMaterial] Target: {target.name}, Size: {target.width}x{target.height}, Format: {target.format}, Readable: {target.isReadable}");
-            Debug.Log($"[TextureBlitter.BlitWithMaterial] Position: ({x}, {y})");
-
 #if UNITY_IOS
-            // ✅ iOS CRITICAL FIX: Use direct Texture2D.SetPixels() to avoid RenderTexture format issues
-            // RenderTexture uses ARGB32 but atlas uses RGBA32 - format mismatch causes crashes
-            // Direct pixel copy with GetPixels/SetPixels handles format conversion safely
-            
+            // iOS: Use direct Texture2D.SetPixels() when both textures are readable
+            // to avoid RenderTexture format conversion issues entirely.
             if (source.isReadable && target.isReadable)
             {
-                Debug.Log($"[TextureBlitter.BlitWithMaterial] iOS: Using direct Texture2D pixel copy (no RenderTexture)...");
                 try
                 {
                     BlitDirectPixelCopy(source, target, x, y);
-                    Debug.Log($"[TextureBlitter.BlitWithMaterial] iOS: Direct pixel copy completed successfully");
-                    Debug.Log($"[TextureBlitter.BlitWithMaterial] ========== SINGLE BLIT END ==========");
                     return;
                 }
-                catch (System.Exception ex)
+                catch (Exception ex)
                 {
                     Debug.LogError($"[TextureBlitter.BlitWithMaterial] iOS: Direct pixel copy failed: {ex.Message}");
                     // Fall through to GPU method
                 }
-            }
-            else
-            {
-                Debug.Log($"[TextureBlitter.BlitWithMaterial] iOS: Textures not readable (source:{source.isReadable}, target:{target.isReadable}), using GPU method...");
             }
 #endif
 
@@ -457,10 +266,7 @@ namespace RuntimeAtlasPacker
 
             try
             {
-                Debug.Log($"[TextureBlitter.BlitWithMaterial] Allocating RenderTexture...");
-
                 // Create RenderTexture matching target size
-                // CRITICAL: Use sRGB for correct color space (prevents burned/washed out colors)
                 rt = RenderTexture.GetTemporary(
                     target.width,
                     target.height,
@@ -470,199 +276,46 @@ namespace RuntimeAtlasPacker
                 );
                 rt.filterMode = FilterMode.Point;
 
-                Debug.Log($"[TextureBlitter.BlitWithMaterial] RenderTexture allocated: {rt.width}x{rt.height}, Format: {rt.format}");
-                
-                // ✅ iOS FIX: Only preserve existing content if texture is readable
-                if (target.isReadable)
-                {
-                    // Preserve existing atlas content by blitting target to RT
-                    Graphics.Blit(target, rt);
-                }
-                else
-                {
-                    // Can't read from non-readable texture, clear instead
-                    RenderTexture.active = rt;
-                    GL.Clear(true, true, Color.clear);
-                    RenderTexture.active = null;
-                }
-                
+                // BUG FIX: Preserve existing atlas content via GPU blit.
+                // Graphics.Blit works with BOTH readable and non-readable textures
+                // because it samples the texture via a shader (GPU operation).
+                // Previously, non-readable textures were cleared with GL.Clear,
+                // which destroyed all previously-added sprites in the atlas.
+                Graphics.Blit(target, rt);
+
                 // Activate RT for rendering
                 RenderTexture.active = rt;
-                
-                // CRITICAL FIX: Flip Y coordinate because Unity's texture coordinates are bottom-left origin
+
+                // Flip Y coordinate because Unity's texture coordinates are bottom-left origin
                 // but we're using top-left pixel coordinates
                 float yFlipped = target.height - y - source.height;
-                
-                // Use Graphics.Blit with custom material for precise positioning
+
+                // Use Graphics.DrawTexture for pixel-perfect positioning
                 Material blitMat = GetBlitMaterial();
+
+                GL.PushMatrix();
+                GL.LoadPixelMatrix(0, target.width, target.height, 0);
+
+                Rect destRect = new Rect(x, yFlipped, source.width, source.height);
                 if (blitMat != null)
                 {
-                    // Set source texture
                     blitMat.mainTexture = source;
-                    
-                    // Use Graphics.DrawTexture for pixel-perfect positioning
-                    GL.PushMatrix();
-                    GL.LoadPixelMatrix(0, target.width, target.height, 0);
-                    
-                    // Draw at exact pixel position with flipped Y
-                    Rect destRect = new Rect(x, yFlipped, source.width, source.height);
                     Graphics.DrawTexture(destRect, source, blitMat);
-                    
-                    GL.PopMatrix();
                 }
                 else
                 {
-                    // Fallback: use Graphics.DrawTexture without material
-                    GL.PushMatrix();
-                    GL.LoadPixelMatrix(0, target.width, target.height, 0);
-                    
-                    // Draw at exact pixel position with flipped Y
-                    Rect destRect = new Rect(x, yFlipped, source.width, source.height);
                     Graphics.DrawTexture(destRect, source);
-                    
-                    GL.PopMatrix();
                 }
-                
+
+                GL.PopMatrix();
                 RenderTexture.active = null;
 
-                // ✅ CRITICAL FIX: Different approach for readable vs non-readable textures
-                Debug.Log($"[TextureBlitter.BlitWithMaterial] Copying RT back to target...");
-
-                // ✅ iOS CRITICAL FIX: Format compatibility check for CopyTexture
-                // Graphics.CopyTexture REQUIRES compatible formats between source and destination.
-                // RenderTexture uses ARGB32 but atlas textures use RGBA32 - these are INCOMPATIBLE!
-                // ARGB32 = [Alpha][Red][Green][Blue], RGBA32 = [Red][Green][Blue][Alpha]
-                // On iOS Metal, format mismatch causes DEFERRED crash in BlitterRemap during sprite access.
-                //
-                // SOLUTION: For READABLE textures, always use ReadPixels (handles format conversion safely).
-                // Only use CopyTexture for NON-READABLE textures where ReadPixels can't work.
-
-#if UNITY_IOS
-                // Check if formats are compatible for CopyTexture
-                // RenderTextureFormat.ARGB32 is NOT compatible with TextureFormat.RGBA32
-                bool formatsCompatible = (rt.format == RenderTextureFormat.ARGB32 && target.format == TextureFormat.ARGB32) ||
-                                         (rt.format == RenderTextureFormat.BGRA32 && target.format == TextureFormat.BGRA32);
-
-                // Only use GPU-only path for NON-READABLE textures (where ReadPixels won't work)
-                // For READABLE textures, always use ReadPixels to safely handle format conversion
-                bool useGPUOnly = !target.isReadable && (target.width >= 2048 || target.height >= 2048);
-                if (useGPUOnly)
-                {
-                    Debug.Log($"[TextureBlitter.BlitWithMaterial] iOS: Non-readable large texture ({target.width}x{target.height}), must use CopyTexture...");
-                    Debug.Log($"[TextureBlitter.BlitWithMaterial] iOS: RT format: {rt.format}, Target format: {target.format}, Formats compatible: {formatsCompatible}");
-
-                    if (!formatsCompatible)
-                    {
-                        Debug.LogWarning($"[TextureBlitter.BlitWithMaterial] iOS: FORMAT MISMATCH WARNING - RT:{rt.format} vs Target:{target.format}. This may cause issues!");
-                    }
-
-                    Debug.Log($"[TextureBlitter.BlitWithMaterial] >>> ABOUT TO CALL Graphics.CopyTexture <<<");
-
-                    try
-                    {
-                        // GPU-only copy - no CPU memory allocation
-                        Graphics.CopyTexture(rt, target);
-                        Debug.Log($"[TextureBlitter.BlitWithMaterial] Graphics.CopyTexture completed");
-
-                        // Force GPU to complete the copy operation
-                        Debug.Log($"[TextureBlitter.BlitWithMaterial] iOS: Forcing GPU flush...");
-                        GL.Flush();
-                        Debug.Log($"[TextureBlitter.BlitWithMaterial] iOS: GPU flush complete");
-                    }
-                    catch (System.Exception copyEx)
-                    {
-                        Debug.LogError($"[TextureBlitter.BlitWithMaterial] ✗ Graphics.CopyTexture FAILED: {copyEx.Message}\n{copyEx.StackTrace}");
-                        throw;
-                    }
-
-                    Debug.Log($"[TextureBlitter.BlitWithMaterial] ========== SINGLE BLIT END ==========");
-                    return; // Skip ReadPixels path
-                }
-
-                // For readable textures on iOS, log that we're using the safe ReadPixels path
-                if (target.isReadable && (target.width >= 2048 || target.height >= 2048))
-                {
-                    Debug.Log($"[TextureBlitter.BlitWithMaterial] iOS: Large READABLE texture ({target.width}x{target.height}), using ReadPixels (safe format conversion)...");
-                }
-#endif
-
-                // For smaller textures or non-iOS, use ReadPixels (safer for readable textures)
-                if (target.isReadable)
-                {
-                    Debug.Log($"[TextureBlitter.BlitWithMaterial] Using ReadPixels (readable texture)...");
-                    Debug.Log($"[TextureBlitter.BlitWithMaterial] >>> ABOUT TO CALL ReadPixels <<<");
-
-                    // For READABLE textures: Use ReadPixels to update CPU memory
-                    RenderTexture.active = rt;
-
-                    try
-                    {
-                        target.ReadPixels(new Rect(0, 0, rt.width, rt.height), 0, 0, false);
-                        Debug.Log($"[TextureBlitter.BlitWithMaterial] ReadPixels completed");
-                    }
-                    catch (System.Exception readEx)
-                    {
-                        Debug.LogError($"[TextureBlitter.BlitWithMaterial] ✗ ReadPixels FAILED: {readEx.Message}");
-                        throw;
-                    }
-
-                    RenderTexture.active = null;
-
-                    Debug.Log($"[TextureBlitter.BlitWithMaterial] >>> ABOUT TO CALL Apply <<<");
-
-                    try
-                    {
-                        // ✅ CRITICAL: Apply immediately to upload pixel data to GPU
-                        // Without this, the texture changes won't be visible!
-                        target.Apply(false, false); // updateMipmaps=false, makeNoLongerReadable=false
-                        Debug.Log($"[TextureBlitter.BlitWithMaterial] Apply completed");
-
-#if UNITY_IOS
-                        // ✅ iOS CRITICAL FIX: Force GPU to complete all pending texture uploads
-                        // On iOS Metal, Apply() schedules a DEFERRED upload. If we return immediately,
-                        // another operation (like atlas save) might access the texture before upload completes.
-                        // GL.Flush() forces all pending GPU operations to complete.
-                        Debug.Log($"[TextureBlitter.BlitWithMaterial] iOS: Forcing GPU flush...");
-                        GL.Flush();
-                        Debug.Log($"[TextureBlitter.BlitWithMaterial] iOS: GPU flush complete");
-#endif
-                    }
-                    catch (System.Exception applyEx)
-                    {
-                        Debug.LogError($"[TextureBlitter.BlitWithMaterial] ✗ Apply FAILED: {applyEx.Message}");
-                        throw;
-                    }
-                }
-                else
-                {
-                    Debug.Log($"[TextureBlitter.BlitWithMaterial] Using Graphics.CopyTexture (non-readable texture)...");
-                    Debug.Log($"[TextureBlitter.BlitWithMaterial] >>> ABOUT TO CALL CopyTexture <<<");
-
-                    try
-                    {
-                        // For NON-READABLE textures: Use Graphics.CopyTexture (GPU-only)
-                        Graphics.CopyTexture(rt, target);
-                        Debug.Log($"[TextureBlitter.BlitWithMaterial] CopyTexture completed");
-
-#if UNITY_IOS
-                        // ✅ iOS CRITICAL FIX: Force GPU to complete the copy operation
-                        Debug.Log($"[TextureBlitter.BlitWithMaterial] iOS: Forcing GPU flush...");
-                        GL.Flush();
-                        Debug.Log($"[TextureBlitter.BlitWithMaterial] iOS: GPU flush complete");
-#endif
-                    }
-                    catch (System.Exception copyEx)
-                    {
-                        Debug.LogError($"[TextureBlitter.BlitWithMaterial] ✗ CopyTexture FAILED: {copyEx.Message}");
-                        throw;
-                    }
-                }
-
-                Debug.Log($"[TextureBlitter.BlitWithMaterial] ========== SINGLE BLIT END ==========");
+                // Copy RT back to target texture (handles format conversion safely)
+                CopyRenderTextureToTexture(rt, target);
             }
-            catch (System.Exception ex)
+            catch (Exception ex)
             {
-                Debug.LogError($"[TextureBlitter.BlitWithMaterial] ✗ FATAL ERROR: {ex.Message}\n{ex.StackTrace}");
+                Debug.LogError($"[TextureBlitter.BlitWithMaterial] FATAL ERROR: {ex.Message}\n{ex.StackTrace}");
                 throw;
             }
             finally
@@ -675,14 +328,14 @@ namespace RuntimeAtlasPacker
                 }
             }
         }
-        
+
         /// <summary>
         /// Get or create the blit material.
         /// </summary>
         private static Material GetBlitMaterial()
         {
             EnsureMaterial();
-            
+
             // If no custom material, create a simple one
             if (_blitMaterial == null)
             {
@@ -692,14 +345,14 @@ namespace RuntimeAtlasPacker
                 {
                     shader = Shader.Find("UI/Default");
                 }
-                
+
                 if (shader != null)
                 {
                     _blitMaterial = new Material(shader);
                     _blitMaterial.hideFlags = HideFlags.HideAndDontSave;
                 }
             }
-            
+
             return _blitMaterial;
         }
 
@@ -747,24 +400,13 @@ namespace RuntimeAtlasPacker
         /// </summary>
         private static void BlitDirectPixelCopy(Texture2D source, Texture2D target, int x, int y)
         {
-            Debug.Log($"[TextureBlitter.BlitDirectPixelCopy] START: {source.width}x{source.height} -> target at ({x},{y})");
-            Debug.Log($"[TextureBlitter.BlitDirectPixelCopy] Source format: {source.format}, Target format: {target.format}");
-            Debug.Log($"[TextureBlitter.BlitDirectPixelCopy] Memory before: {System.GC.GetTotalMemory(false) / (1024 * 1024)}MB");
-
             // Get source pixels - Unity handles format conversion automatically
             var sourcePixels = source.GetPixels();
-            Debug.Log($"[TextureBlitter.BlitDirectPixelCopy] Got {sourcePixels.Length} source pixels");
 
             // SetPixels with region - only modifies the target region, very efficient
             target.SetPixels(x, y, source.width, source.height, sourcePixels);
-            Debug.Log($"[TextureBlitter.BlitDirectPixelCopy] SetPixels complete (region: {x},{y} size:{source.width}x{source.height})");
 
-            Debug.Log($"[TextureBlitter.BlitDirectPixelCopy] Calling Apply...");
             target.Apply(false, false);
-            Debug.Log($"[TextureBlitter.BlitDirectPixelCopy] Apply complete");
-
-            Debug.Log($"[TextureBlitter.BlitDirectPixelCopy] Memory after: {System.GC.GetTotalMemory(false) / (1024 * 1024)}MB");
-            Debug.Log($"[TextureBlitter.BlitDirectPixelCopy] COMPLETE");
         }
 
         /// <summary>
@@ -774,16 +416,12 @@ namespace RuntimeAtlasPacker
         /// </summary>
         private static void BlitCPUDirect(Texture2D source, Texture2D target, int x, int y)
         {
-            Debug.Log($"[TextureBlitter.BlitCPUDirect] Starting CPU copy: {source.width}x{source.height} -> ({x},{y})");
-
             // Get source pixels as Color32 (byte format - matches ARGB32)
             var sourcePixels = source.GetPixels32();
-            Debug.Log($"[TextureBlitter.BlitCPUDirect] Got source pixels: {sourcePixels.Length} pixels");
 
             // Get target pixels, modify the region, then set back
             // This is necessary because SetPixels32 doesn't have a region overload
             var targetPixels = target.GetPixels32();
-            Debug.Log($"[TextureBlitter.BlitCPUDirect] Got target pixels: {targetPixels.Length} pixels");
 
             // Copy source pixels into the correct position in target
             int srcWidth = source.width;
@@ -801,22 +439,14 @@ namespace RuntimeAtlasPacker
                 }
             }
 
-            Debug.Log($"[TextureBlitter.BlitCPUDirect] Pixels copied, calling SetPixels32...");
-
             // Set all pixels back
             target.SetPixels32(targetPixels);
-
-            Debug.Log($"[TextureBlitter.BlitCPUDirect] SetPixels32 complete, calling Apply...");
 
             // Apply changes - this uploads to GPU
             target.Apply(false, false);
 
-            Debug.Log($"[TextureBlitter.BlitCPUDirect] Apply complete");
-
 #if UNITY_IOS
-            // ✅ iOS CRITICAL FIX: Force GPU to complete the texture upload
             GL.Flush();
-            Debug.Log($"[TextureBlitter.BlitCPUDirect] iOS: GL.Flush() complete");
 #endif
         }
 
@@ -869,7 +499,7 @@ namespace RuntimeAtlasPacker
             var clear = new Color32(0, 0, 0, 0);
 
             int width = texture.width;
-            
+
             for (int y = region.y; y < region.y + region.height && y < texture.height; y++)
             {
                 for (int x = region.x; x < region.x + region.width && x < width; x++)
@@ -892,17 +522,17 @@ namespace RuntimeAtlasPacker
                 // Use RenderTexture workaround
                 var rt = RenderTexture.GetTemporary(source.width, source.height, 0, RenderTextureFormat.ARGB32);
                 Graphics.Blit(source, rt);
-                
+
                 var prev = RenderTexture.active;
                 RenderTexture.active = rt;
-                
+
                 var result = new Texture2D(region.width, region.height, AtlasSettings.DefaultFormat, false);
                 result.ReadPixels(new Rect(region.x, region.y, region.width, region.height), 0, 0);
                 result.Apply();
-                
+
                 RenderTexture.active = prev;
                 RenderTexture.ReleaseTemporary(rt);
-                
+
                 return result;
             }
 
@@ -910,7 +540,7 @@ namespace RuntimeAtlasPacker
             var sourcePixels = source.GetPixels(region.x, region.y, region.width, region.height);
             copy.SetPixels(sourcePixels);
             copy.Apply();
-            
+
             return copy;
         }
 

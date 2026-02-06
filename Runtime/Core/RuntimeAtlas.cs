@@ -376,8 +376,17 @@ namespace RuntimeAtlasPacker
                 try
                 {
                     var pageTexture = _textures[entry.TextureIndex];
-                    // ✅ MEMORY FIX: Use makeNoLongerReadable to free CPU memory immediately
                     bool makeNoLongerReadable = !_settings.Readable;
+#if UNITY_IOS
+                    // iOS: Never make atlas non-readable. Non-readable textures require
+                    // Graphics.CopyTexture for blit operations, which has format mismatch
+                    // issues on Metal (ARGB32 RT vs ARGB32 Texture2D map to different
+                    // internal pixel formats). Keeping readable avoids this crash path.
+                    if (makeNoLongerReadable)
+                    {
+                        makeNoLongerReadable = false;
+                    }
+#endif
                     pageTexture.Apply(false, makeNoLongerReadable);
                     _isDirty = false;
                 }
@@ -391,7 +400,7 @@ namespace RuntimeAtlasPacker
 
             // Validate no overlaps
             ValidateNoOverlaps();
-            
+
 #if UNITY_EDITOR
             RuntimeAtlasProfiler.End(profiler);
 #endif
@@ -418,7 +427,7 @@ namespace RuntimeAtlasPacker
 #endif
                 return (AddResultType.Failed, null);
             }
-            
+
             if (texture == null)
             {
 #if UNITY_EDITOR
@@ -451,7 +460,7 @@ namespace RuntimeAtlasPacker
 
             // Use internal method for packing
             var (result, entry) = AddInternal(texture, border, pivot, pixelsPerUnit, spriteVersion);
-            
+
             if (result != AddResultType.Success)
             {
 #if UNITY_EDITOR
@@ -460,15 +469,20 @@ namespace RuntimeAtlasPacker
 #endif
                 return (result, null);
             }
-            
+
             // Apply texture changes
             if (entry != null)
             {
                 try
                 {
                     var pageTexture = _textures[entry.TextureIndex];
-                    // ✅ MEMORY FIX: Use makeNoLongerReadable to free CPU memory immediately
                     bool makeNoLongerReadable = !_settings.Readable;
+#if UNITY_IOS
+                    if (makeNoLongerReadable)
+                    {
+                        makeNoLongerReadable = false;
+                    }
+#endif
                     pageTexture.Apply(false, makeNoLongerReadable);
                     _isDirty = false;
                 }
@@ -1031,21 +1045,16 @@ namespace RuntimeAtlasPacker
                 _version++;
                 _isDirty = true;
 
-                // ✅ OPTIMIZATION: Apply changes ONCE to all modified pages after ALL textures have been added
-                // This avoids toggling readable state multiple times per texture
+                // Apply changes ONCE to all modified pages after ALL textures have been added
                 bool makeNoLongerReadable = !_settings.Readable;
-                
-#if UNITY_EDITOR || UNITY_IOS
+#if UNITY_IOS
+                // iOS: Never make atlas non-readable to avoid Metal format mismatch crashes
                 if (makeNoLongerReadable)
                 {
-                    Debug.Log($"[RuntimeAtlas.AddBatch] Applying and making {modifiedPages.Count} pages non-readable to save memory...");
-                }
-                else
-                {
-                    Debug.Log($"[RuntimeAtlas.AddBatch] Applying changes to {modifiedPages.Count} pages (keeping readable)...");
+                    makeNoLongerReadable = false;
                 }
 #endif
-                
+
                 try
                 {
                     foreach (var pageIndex in modifiedPages.Keys)
@@ -1054,41 +1063,23 @@ namespace RuntimeAtlasPacker
                         {
                             var pageTexture = _textures[pageIndex];
 
-                            Debug.Log($"[RuntimeAtlas.AddBatch] Processing page {pageIndex}...");
-                            Debug.Log($"[RuntimeAtlas.AddBatch] Page {pageIndex} - Name: {pageTexture.name}, Size: {pageTexture.width}x{pageTexture.height}, Format: {pageTexture.format}, Readable: {pageTexture.isReadable}");
-
                             // Skip if we're trying to make non-readable but it's already non-readable
                             if (makeNoLongerReadable && !pageTexture.isReadable)
                             {
-                                Debug.Log($"[RuntimeAtlas.AddBatch] Page {pageIndex} already non-readable, skipping Apply");
                                 continue;
                             }
 
-                            Debug.Log($"[RuntimeAtlas.AddBatch] >>> ABOUT TO CALL Apply on page {pageIndex} - makeNoLongerReadable={makeNoLongerReadable} <<<");
-                            Debug.Log($"[RuntimeAtlas.AddBatch] Memory before Apply: {System.GC.GetTotalMemory(false) / 1024 / 1024} MB");
-
-                            // ✅ KEY OPTIMIZATION: Call Apply ONCE per page after all textures added
-                            // makeNoLongerReadable=true: Frees CPU memory (texture becomes non-readable)
-                            // makeNoLongerReadable=false: Keeps CPU memory (texture stays readable)
                             pageTexture.Apply(false, makeNoLongerReadable);
-
-                            Debug.Log($"[RuntimeAtlas.AddBatch] ✓ Page {pageIndex}: Apply completed successfully");
-                            Debug.Log($"[RuntimeAtlas.AddBatch] Memory after Apply: {System.GC.GetTotalMemory(false) / 1024 / 1024} MB");
                         }
                     }
                     _isDirty = false;
                 }
                 catch (UnityException ex)
                 {
-                    Debug.LogError($"[RuntimeAtlas.AddBatch] ✗ CRASH during Apply: {ex.Message}");
-                    Debug.LogError($"[RuntimeAtlas.AddBatch] Stack trace: {ex.StackTrace}");
-                    throw; // Re-throw to preserve stack trace
+                    Debug.LogError($"[RuntimeAtlas.AddBatch] CRASH during Apply: {ex.Message}");
+                    throw;
                 }
             }
-            
-#if UNITY_EDITOR || UNITY_IOS
-            Debug.Log($"[RuntimeAtlas.AddBatch] ✓ COMPLETE. Success: {successCount}, Failed: {failCount}, Final memory: {System.GC.GetTotalMemory(false) / 1024 / 1024} MB");
-#endif
             
 #if UNITY_EDITOR
             Debug.Log($"[RuntimeAtlas] AddBatch: Complete. Added: {successCount}, Failed: {failCount}, Total entries in atlas: {_entries.Count}");
@@ -1257,48 +1248,33 @@ namespace RuntimeAtlasPacker
                 }
             }
 
-            // ✅ OPTIMIZATION: Apply changes ONCE to all modified pages after ALL textures have been added
-            // This avoids toggling readable state multiple times per texture
+            // Apply changes ONCE to all modified pages after ALL textures have been added
             if (successCount > 0)
             {
                 bool makeNoLongerReadable = !_settings.Readable;
-                
+#if UNITY_IOS
+                // iOS: Never make atlas non-readable to avoid Metal format mismatch crashes
+                if (makeNoLongerReadable)
+                {
+                    makeNoLongerReadable = false;
+                }
+#endif
+
                 try
                 {
-#if UNITY_EDITOR
-                    if (makeNoLongerReadable)
-                    {
-                        Debug.Log($"[RuntimeAtlas] AddBatch: Applying and making {modifiedPages.Count} pages non-readable to save memory...");
-                    }
-                    else
-                    {
-                        Debug.Log($"[RuntimeAtlas] AddBatch: Applying changes to {modifiedPages.Count} pages (keeping readable)...");
-                    }
-#endif
-                    
                     foreach (var pageIndex in modifiedPages)
                     {
                         if (pageIndex >= 0 && pageIndex < _textures.Count)
                         {
                             var pageTexture = _textures[pageIndex];
-                            
+
                             // Skip if we're trying to make non-readable but it's already non-readable
                             if (makeNoLongerReadable && !pageTexture.isReadable)
                             {
-#if UNITY_EDITOR
-                                Debug.Log($"[RuntimeAtlas] AddBatch: Page {pageIndex} already non-readable, skipping Apply");
-#endif
                                 continue;
                             }
-                            
-                            // ✅ KEY OPTIMIZATION: Call Apply ONCE per page after all textures added
-                            // makeNoLongerReadable=true: Frees CPU memory (texture becomes non-readable)
-                            // makeNoLongerReadable=false: Keeps CPU memory (texture stays readable)
+
                             pageTexture.Apply(false, makeNoLongerReadable);
-                            
-#if UNITY_EDITOR
-                            Debug.Log($"[RuntimeAtlas] AddBatch: ✓ Page {pageIndex}: Applied (readable={!makeNoLongerReadable})");
-#endif
                         }
                     }
                     _isDirty = false;
@@ -1475,18 +1451,12 @@ namespace RuntimeAtlasPacker
             int version = 0,
             CancellationToken cancellationToken = default)
         {
-            Debug.Log($"[RuntimeAtlas.DownloadAndAddAsync] ========== START SINGLE DOWNLOAD ==========");
-            Debug.Log($"[RuntimeAtlas.DownloadAndAddAsync] URL: {url}");
-            Debug.Log($"[RuntimeAtlas.DownloadAndAddAsync] Key: {key ?? "(auto-generate)"}");
-            Debug.Log($"[RuntimeAtlas.DownloadAndAddAsync] Version: {version}");
-            
             if (string.IsNullOrEmpty(url))
             {
                 Debug.LogWarning("[RuntimeAtlas.DownloadAndAddAsync] URL is null or empty");
                 return null;
             }
 
-            Debug.Log($"[RuntimeAtlas.DownloadAndAddAsync] Preparing download with key resolution...");
             var urlsWithKeys = new Dictionary<string, string>
             {
                 [url] = key ?? $"Remote_{url.GetHashCode():X8}"
@@ -1494,31 +1464,22 @@ namespace RuntimeAtlasPacker
 
             // Use the same key as urlsWithKeys for versions lookup
             var resolvedKey = urlsWithKeys[url];
-            Debug.Log($"[RuntimeAtlas.DownloadAndAddAsync] Resolved key: '{resolvedKey}'");
-            
             var versions = version != 0 ? new Dictionary<string, int> { [resolvedKey] = version } : null;
 
-            Debug.Log($"[RuntimeAtlas.DownloadAndAddAsync] Calling DownloadAndAddBatchAsync with 1 item...");
-            Debug.Log($"[RuntimeAtlas.DownloadAndAddAsync] Memory before batch call: {System.GC.GetTotalMemory(false) / (1024 * 1024)}MB");
-            
             var results = await DownloadAndAddBatchAsync(urlsWithKeys, versions, maxConcurrentDownloads: 1, cancellationToken);
-            
-            Debug.Log($"[RuntimeAtlas.DownloadAndAddAsync] Batch call completed, processing results...");
-            Debug.Log($"[RuntimeAtlas.DownloadAndAddAsync] Results count: {results.Count}");
-            Debug.Log($"[RuntimeAtlas.DownloadAndAddAsync] Memory after batch call: {System.GC.GetTotalMemory(false) / (1024 * 1024)}MB");
-            
+
             var result = results.Values.FirstOrDefault();
-            
+
+#if UNITY_EDITOR
             if (result != null && result.IsValid)
             {
-                Debug.Log($"[RuntimeAtlas.DownloadAndAddAsync] ✓ SUCCESS - Entry ID: {result.Id}, Name: '{result.Name}'");
+                Debug.Log($"[RuntimeAtlas.DownloadAndAddAsync] SUCCESS - Entry ID: {result.Id}, Name: '{result.Name}'");
             }
             else
             {
-                Debug.LogWarning($"[RuntimeAtlas.DownloadAndAddAsync] ✗ FAILED - No valid entry returned");
+                Debug.LogWarning($"[RuntimeAtlas.DownloadAndAddAsync] FAILED - No valid entry returned");
             }
-            
-            Debug.Log($"[RuntimeAtlas.DownloadAndAddAsync] ========== END SINGLE DOWNLOAD ==========");
+#endif
             return result;
         }
         
@@ -1561,11 +1522,11 @@ namespace RuntimeAtlasPacker
         {
             if (texture == null)
             {
+#if UNITY_EDITOR
                 Debug.LogWarning("[RuntimeAtlas.AddInternal] NULL texture provided");
+#endif
                 return (AddResultType.InvalidTexture, null);
             }
-
-            Debug.Log($"[RuntimeAtlas.AddInternal] START - texture: '{texture.name}', size: {texture.width}x{texture.height}, format: {texture.format}, version: {spriteVersion}");
 
             var width = texture.width + _settings.Padding * 2;
             var height = texture.height + _settings.Padding * 2;
@@ -1577,14 +1538,12 @@ namespace RuntimeAtlasPacker
                 return (AddResultType.TooLarge, null);
             }
 
-            Debug.Log($"[RuntimeAtlas.AddInternal] Attempting to pack '{texture.name}' in current page {_currentPageIndex}");
             // Try to pack in current page first
             var pageIndex = _currentPageIndex;
             var packed = TryPackInPage(pageIndex, width, height, out var packedRect);
-            
+
             if (!packed)
             {
-                Debug.Log($"[RuntimeAtlas.AddInternal] Failed to pack in current page, trying all existing pages...");
                 // Try all existing pages before creating a new one
                 for (var i = 0; i < _textures.Count; i++)
                 {
@@ -1592,42 +1551,39 @@ namespace RuntimeAtlasPacker
                     {
                         continue; // Already tried current page
                     }
-                    
+
                     if (TryPackInPage(i, width, height, out packedRect))
                     {
                         packed = true;
                         pageIndex = i;
-                        Debug.Log($"[RuntimeAtlas.AddInternal] Successfully packed in page {pageIndex}");
                         break;
                     }
                 }
-                
+
                 // If still not packed, try creating a new page
                 if (!packed)
                 {
                     // Check if we can create more pages
                     var canCreatePage = _settings.MaxPageCount == -1 || _textures.Count < _settings.MaxPageCount;
-                    
+
                     if (!canCreatePage)
                     {
-                        Debug.LogError($"[RuntimeAtlas.AddInternal] Cannot add texture '{texture.name}': Atlas has reached maximum page limit ({_settings.MaxPageCount} pages) and all pages are full!");
+                        Debug.LogError($"[RuntimeAtlas.AddInternal] Cannot add texture '{texture.name}': Atlas full ({_settings.MaxPageCount} pages)");
                         return (AddResultType.Full, null);
                     }
-                    
-                    Debug.Log($"[RuntimeAtlas.AddInternal] Creating new page for '{texture.name}'");
+
                     // Create new page
                     CreateNewPage();
                     pageIndex = _currentPageIndex;
-                    
+
                     // Try packing in new page
                     packed = TryPackInPage(pageIndex, width, height, out packedRect);
-                    
+
                     if (!packed)
                     {
-                        Debug.LogError($"[RuntimeAtlas.AddInternal] Failed to pack '{texture.name}' even in new page! This should not happen.");
+                        Debug.LogError($"[RuntimeAtlas.AddInternal] Failed to pack '{texture.name}' even in new page!");
                         return (AddResultType.Full, null);
                     }
-                    Debug.Log($"[RuntimeAtlas.AddInternal] Successfully packed in new page {pageIndex}");
                 }
             }
 
@@ -1641,27 +1597,18 @@ namespace RuntimeAtlasPacker
                 texture.height
             );
 
-            Debug.Log($"[RuntimeAtlas.AddInternal] Packed rect for '{texture.name}': page={pageIndex}, pos=({contentRect.x},{contentRect.y}), size=({contentRect.width},{contentRect.height})");
-            Debug.Log($"[RuntimeAtlas.AddInternal] About to blit '{texture.name}' to page {pageIndex} at ({contentRect.x},{contentRect.y})");
-            Debug.Log($"[RuntimeAtlas.AddInternal] Source texture - Name: '{texture.name}', Size: {texture.width}x{texture.height}, Format: {texture.format}, Readable: {texture.isReadable}");
-            Debug.Log($"[RuntimeAtlas.AddInternal] Target texture - Name: '{currentTexture.name}', Size: {currentTexture.width}x{currentTexture.height}, Format: {currentTexture.format}, Readable: {currentTexture.isReadable}");
-            Debug.Log($"[RuntimeAtlas.AddInternal] Memory before blit: {System.GC.GetTotalMemory(false) / (1024 * 1024)}MB");
-
             // Blit texture to atlas page
             try
             {
                 TextureBlitter.Blit(texture, currentTexture, contentRect.x, contentRect.y);
-                Debug.Log($"[RuntimeAtlas.AddInternal] ✓ Blit successful for '{texture.name}'");
-                Debug.Log($"[RuntimeAtlas.AddInternal] Memory after blit: {System.GC.GetTotalMemory(false) / (1024 * 1024)}MB");
             }
             catch (Exception ex)
             {
-                Debug.LogError($"[RuntimeAtlas.AddInternal] ✗ BLIT FAILED for '{texture.name}': {ex.GetType().Name} - {ex.Message}");
-                Debug.LogError($"[RuntimeAtlas.AddInternal] Stack trace: {ex.StackTrace}");
+                Debug.LogError($"[RuntimeAtlas.AddInternal] BLIT FAILED for '{texture.name}': {ex.GetType().Name} - {ex.Message}");
                 return (AddResultType.Failed, null);
             }
-            
-            // Calculate UV - ✅ FIX: Ensure float division for precision
+
+            // Calculate UV
             var uvRect = new Rect(
                 (float)contentRect.x / (float)currentTexture.width,
                 (float)contentRect.y / (float)currentTexture.height,
@@ -1670,25 +1617,19 @@ namespace RuntimeAtlasPacker
             );
 
             // Create entry with texture index
-            Debug.Log($"[RuntimeAtlas.AddInternal] Creating atlas entry for '{texture.name}'");
             var id = GetNextId();
             var entry = new AtlasEntry(this, id, pageIndex, contentRect, uvRect, texture.name, default, default, 100f, spriteVersion);
             _entries[id] = entry;
-            
-            Debug.Log($"[RuntimeAtlas.AddInternal] Entry created: ID={id}, page={pageIndex}, name='{texture.name}'");
-            
+
             _version++;
             _isDirty = true;
-
 
             // Auto-repack if enabled
             if (_settings.RepackOnAdd)
             {
-                Debug.Log($"[RuntimeAtlas.AddInternal] Repacking page {pageIndex}");
                 RepackPage(pageIndex);
             }
 
-            Debug.Log($"[RuntimeAtlas.AddInternal] ✓ COMPLETE for '{texture.name}' - Entry ID: {id}");
             return (AddResultType.Success, entry);
         }
 
@@ -1975,15 +1916,43 @@ namespace RuntimeAtlasPacker
                 newTexture.wrapMode = TextureWrapMode.Clamp;
                 newTexture.name = $"RuntimeAtlas_Page{pageIndex}";
 
-                // Clear to transparent
-                var clearPixels = new Color32[newSize * newSize];
-                newTexture.SetPixels32(clearPixels);
-                // ✅ MEMORY FIX: Use makeNoLongerReadable to free CPU memory immediately
-                bool makeNoLongerReadable = !_settings.Readable;
-                newTexture.Apply(false, makeNoLongerReadable);
+                // Clear to transparent using RenderTexture (avoids huge managed allocation)
+                // Previously used new Color32[newSize * newSize] which allocates up to 64MB on heap
+                RenderTexture clearRT = null;
+                try
+                {
+                    clearRT = RenderTexture.GetTemporary(newSize, newSize, 0, RenderTextureFormat.ARGB32);
+                    var prevRT = RenderTexture.active;
+                    RenderTexture.active = clearRT;
+                    GL.Clear(true, true, Color.clear);
+
+                    // ReadPixels from cleared RT to new texture
+                    newTexture.ReadPixels(new Rect(0, 0, newSize, newSize), 0, 0, false);
+                    RenderTexture.active = prevRT;
+                    newTexture.Apply(false, false); // Keep readable until CopyTexture completes
+                }
+                finally
+                {
+                    if (clearRT != null)
+                        RenderTexture.ReleaseTemporary(clearRT);
+                }
 
                 // Copy old texture data
                 Graphics.CopyTexture(oldTexture, 0, 0, 0, 0, oldSize, oldSize, newTexture, 0, 0, 0, 0);
+
+                // Now make non-readable if desired (after CopyTexture is done)
+                bool makeNoLongerReadable = !_settings.Readable;
+#if UNITY_IOS
+                // iOS: Never make atlas non-readable to avoid Metal format mismatch crashes
+                if (makeNoLongerReadable)
+                {
+                    makeNoLongerReadable = false;
+                }
+#endif
+                if (makeNoLongerReadable)
+                {
+                    newTexture.Apply(false, true);
+                }
 
                 // Update packer
                 _packers[pageIndex].Resize(newSize, newSize);
@@ -2373,8 +2342,14 @@ namespace RuntimeAtlasPacker
                 }
                 
                 // Apply changes to the atlas page
-                // We preserve the readability setting
                 bool makeNoLongerReadable = !_settings.Readable;
+#if UNITY_IOS
+                // iOS: Never make atlas non-readable to avoid Metal format mismatch crashes
+                if (makeNoLongerReadable)
+                {
+                    makeNoLongerReadable = false;
+                }
+#endif
                 texture.Apply(false, makeNoLongerReadable);
             }
             finally
